@@ -111,7 +111,7 @@ export default class ExamDashboard extends React.Component {
     this.setState({ auditLoading: true, auditError: '' });
 
     try {
-      const response = await fetch('http://127.0.0.1:8000/api/audit-logs');
+      const response = await fetch('https://secure-ems.onrender.com/api/audit-logs');
       const data = await response.json();
 
       if (!response.ok) {
@@ -144,7 +144,7 @@ export default class ExamDashboard extends React.Component {
     this.setState({ error: '', loading: true });
 
     try {
-      const response = await fetch('http://127.0.0.1:8000/api/decrypt', {
+      const response = await fetch('https://secure-ems.onrender.com/api/decrypt', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
