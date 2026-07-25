@@ -1,0 +1,15 @@
+[2026-07-23 11:29:05] SUCCESS: Question paper encrypted and saved as 'exam_paper_encrypted.enc'.
+[2026-07-23 11:29:05] Access requested at 2026-07-23 11:29:05.753955. Scheduled exam time: 2026-07-23 11:29:10.753955
+[2026-07-23 11:29:05] SECURITY VIOLATION: Unauthorized early decryption attempt blocked.
+[2026-07-23 11:29:10] Access requested at 2026-07-23 11:29:10.764972. Scheduled exam time: 2026-07-23 11:29:10.753955
+[2026-07-23 11:29:10] SUCCESS: Time-lock verified. Question paper decrypted for exam center.
+[2026-07-23 11:29:27] SUCCESS: Question paper encrypted and saved as 'exam_paper_encrypted.enc'.
+[2026-07-23 11:29:27] Access requested at 2026-07-23 11:29:27.416680. Scheduled exam time: 2026-07-23 11:29:32.416680
+[2026-07-23 11:29:27] SECURITY VIOLATION: Unauthorized early decryption attempt blocked.
+[2026-07-23 11:29:32] Access requested at 2026-07-23 11:29:32.423106. Scheduled exam time: 2026-07-23 11:29:32.416680
+[2026-07-23 11:29:32] SUCCESS: Time-lock verified. Question paper decrypted for exam center.
+[2026-07-23 12:15:36] SUCCESS: Question paper encrypted and saved as 'exam_paper_encrypted.enc'.
+[2026-07-23 12:15:36] Access requested at 2026-07-23 12:15:36.502978. Scheduled exam time: 2026-07-23 12:15:41.502978
+[2026-07-23 12:15:36] SECURITY VIOLATION: Unauthorized early decryption attempt blocked.
+[2026-07-23 12:15:41] Access requested at 2026-07-23 12:15:41.508285. Scheduled exam time: 2026-07-23 12:15:41.502978
+[2026-07-23 12:15:41] SUCCESS: Time-lock verified. Question paper decrypted for exam center.
