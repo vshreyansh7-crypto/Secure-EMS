@@ -21,11 +21,11 @@ app.add_middleware(
 
 SUPERVISOR_DATABASE = {
     "supervisor_center1": {
-        "pin": "1234",
+        "pin": "4567",
         "center_code": "CTR-101",
         "subject_code": "CS-602",
         "authorized_window_start": "2026-07-24T09:00:00",
-        "authorized_window_end": "2026-07-30T23:00:00",
+        "authorized_window_end": "2026-08-30T23:00:00",
     }
 }
 
