@@ -44,7 +44,7 @@ describe('ExamDashboard Auto-Logout Timer', () => {
     });
 
     const pinInput = screen.getByLabelText(/secure token \/ pin/i);
-    fireEvent.change(pinInput, { target: { value: '1234' } });
+    fireEvent.change(pinInput, { target: { value: '4567' } });
     fireEvent.submit(pinInput.closest('form'));
 
     await act(async () => {
@@ -78,7 +78,7 @@ describe('ExamDashboard Auto-Logout Timer', () => {
     });
 
     const pinInput = screen.getByLabelText(/secure token \/ pin/i);
-    fireEvent.change(pinInput, { target: { value: '1234' } });
+    fireEvent.change(pinInput, { target: { value: '4567' } });
     fireEvent.submit(pinInput.closest('form'));
 
     await act(async () => {
