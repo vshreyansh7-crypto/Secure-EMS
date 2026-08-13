@@ -1,18 +1,26 @@
 import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
+
+let plugins = []
+try {
+  const reactModule = await import('@vitejs/plugin-react')
+  const react = reactModule.default || reactModule
+  plugins.push(react())
+} catch (e) {
+  // Built-in esbuild JSX fallback if @vitejs/plugin-react is not installed
+}
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins,
+  esbuild: {
+    jsx: 'automatic',
+  },
   resolve: {
     dedupe: ['react', 'react-dom'],
   },
   test: {
     environment: 'jsdom',
     globals: true,
-    deps: {
-      inline: ['react', 'react-dom'],
-    },
     setupFiles: './src/setupTests.js',
   },
 })

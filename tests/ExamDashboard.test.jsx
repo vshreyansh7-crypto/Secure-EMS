@@ -16,6 +16,20 @@ describe('ExamDashboard Auto-Logout Timer', () => {
           });
         }
 
+        if (String(url).includes('/api/admin/papers')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ papers: [] }),
+          });
+        }
+
+        if (String(url).includes('/api/supervisor/student-status')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ students: [] }),
+          });
+        }
+
         if (String(url).includes('/api/decrypt')) {
           return Promise.resolve({
             ok: true,
@@ -43,7 +57,7 @@ describe('ExamDashboard Auto-Logout Timer', () => {
       vi.advanceTimersByTime(10000);
     });
 
-    const pinInput = screen.getByLabelText(/secure token \/ pin/i);
+    const pinInput = screen.getByLabelText(/supervisor secure pin/i);
     fireEvent.change(pinInput, { target: { value: '1234' } });
     fireEvent.submit(pinInput.closest('form'));
 
@@ -77,7 +91,7 @@ describe('ExamDashboard Auto-Logout Timer', () => {
       vi.advanceTimersByTime(10000);
     });
 
-    const pinInput = screen.getByLabelText(/secure token \/ pin/i);
+    const pinInput = screen.getByLabelText(/supervisor secure pin/i);
     fireEvent.change(pinInput, { target: { value: '1234' } });
     fireEvent.submit(pinInput.closest('form'));
 
