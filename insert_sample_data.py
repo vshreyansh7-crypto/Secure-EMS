@@ -64,21 +64,78 @@ def insert_sample_data():
     controller_row = cursor.fetchone()
     controller_id = controller_row[0] if controller_row else 1
 
-    # 4. Insert Sample Question Paper Metadata
+    # 4. Encrypt and Insert Sample Question Paper Metadata
+    try:
+        from cryptography.fernet import Fernet
+    except ImportError:
+        import base64
+        import hashlib
+
+        class Fernet:
+            def __init__(self, key):
+                self.key = key if isinstance(key, bytes) else key.encode('utf-8')
+
+            @staticmethod
+            def generate_key():
+                import os
+                return base64.urlsafe_b64encode(os.urandom(32))
+
+            def encrypt(self, data: bytes) -> bytes:
+                k = hashlib.sha256(self.key).digest()
+                xored = bytes(b ^ k[i % len(k)] for i, b in enumerate(data))
+                return base64.urlsafe_b64encode(xored)
+
+            def decrypt(self, token: bytes) -> bytes:
+                raw = base64.urlsafe_b64decode(token)
+                k = hashlib.sha256(self.key).digest()
+                return bytes(b ^ k[i % len(k)] for i, b in enumerate(raw))
+
     cursor.execute("DELETE FROM question_papers WHERE subject_code = ?;", ('CS-602',))
 
-    # Schedule unlock time 10 seconds from now for the demo verification flow
+    admin_key = Fernet.generate_key()
+    supervisor_key = Fernet.generate_key()
+
+    cipher_admin = Fernet(admin_key)
+    cipher_supervisor = Fernet(supervisor_key)
+
+    raw_paper = (
+        "CONFIDENTIAL CENTRAL UNIVERSITY EXAMINATION 2026\n"
+        "Subject: Computer Science - Database Systems & Security (CS-602)\n"
+        "Max Marks: 100 | Time Allowed: 3 Hours\n\n"
+        "Q1. Explain the architecture of FastAPI and asynchronous request handling.\n"
+        "Q2. Discuss database indexing strategies for high-concurrency systems.\n"
+        "Q3. Describe the implementation of time-locked cryptographic decryption."
+    )
+
+    # Stage 1: Encrypt with Admin Controller Key
+    stage1_bytes = cipher_admin.encrypt(raw_paper.encode('utf-8'))
+    # Stage 2: Encrypt with Center Supervisor Key (Nested Lock)
+    stage2_bytes = cipher_supervisor.encrypt(stage1_bytes)
+
+    enc_file_path = "exam_paper_encrypted.enc"
+    with open(enc_file_path, "wb") as f:
+        f.write(stage2_bytes)
+
+    # Schedule unlock time 10 seconds from now for demo verification flow
     scheduled_unlock = (datetime.now() + timedelta(seconds=10)).strftime("%Y-%m-%d %H:%M:%S")
     
     cursor.execute("""
-    INSERT OR IGNORE INTO question_papers (subject_code, encrypted_file_path, scheduled_unlock_time, uploaded_by)
-    VALUES (?, ?, ?, ?);
-    """, ('CS-602', 'exam_paper_encrypted.enc', scheduled_unlock, controller_id))
+    INSERT INTO question_papers (subject_code, encrypted_file_path, scheduled_unlock_time, encryption_key, admin_key, supervisor_key, uploaded_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?);
+    """, (
+        'CS-602',
+        enc_file_path,
+        scheduled_unlock,
+        admin_key.decode('utf-8'),
+        admin_key.decode('utf-8'),
+        supervisor_key.decode('utf-8'),
+        controller_id
+    ))
 
     conn.commit()
     conn.close()
     
-    print("Sample test records successfully populated!")
+    print("Sample test records & encrypted question paper successfully populated!")
 
 if __name__ == "__main__":
     insert_sample_data()

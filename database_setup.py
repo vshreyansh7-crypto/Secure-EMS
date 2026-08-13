@@ -16,6 +16,17 @@ def ensure_exam_center_pin_column(cursor):
     if "pin_hash" not in columns:
         cursor.execute("ALTER TABLE exam_centers ADD COLUMN pin_hash TEXT;")
 
+
+def ensure_question_papers_encryption_key_column(cursor):
+    cursor.execute("PRAGMA table_info(question_papers);")
+    columns = {row[1] for row in cursor.fetchall()}
+    if "encryption_key" not in columns:
+        cursor.execute("ALTER TABLE question_papers ADD COLUMN encryption_key TEXT;")
+    if "admin_key" not in columns:
+        cursor.execute("ALTER TABLE question_papers ADD COLUMN admin_key TEXT;")
+    if "supervisor_key" not in columns:
+        cursor.execute("ALTER TABLE question_papers ADD COLUMN supervisor_key TEXT;")
+
 def initialize_database():
     # Check if database already exists
     db_exists = os.path.exists(DB_NAME)
@@ -71,11 +82,15 @@ def initialize_database():
         subject_code TEXT NOT NULL,
         encrypted_file_path TEXT NOT NULL,
         scheduled_unlock_time TIMESTAMP NOT NULL,
+        encryption_key TEXT,
+        admin_key TEXT,
+        supervisor_key TEXT,
         uploaded_by INTEGER,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (uploaded_by) REFERENCES users(user_id)
     );
     """)
+    ensure_question_papers_encryption_key_column(cursor)
 
     # 5. Audit Logs Table (Append-Only for Security)
     cursor.execute("""
