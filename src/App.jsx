@@ -15,17 +15,26 @@ export default function App() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
+  const hostname = window.location.hostname;
+  const defaultPortal = import.meta.env.VITE_DEFAULT_PORTAL;
+
   const isAdminPortal =
+    hostname.includes('admin') ||
+    defaultPortal === 'admin' ||
     route.startsWith('/admin') ||
     window.location.search.includes('portal=admin') ||
     window.location.hash.includes('admin');
 
   const isSupervisorPortal =
+    hostname.includes('supervisor') ||
+    defaultPortal === 'supervisor' ||
     route.startsWith('/supervisor') ||
     window.location.search.includes('portal=supervisor') ||
     window.location.hash.includes('supervisor');
 
   const isStudentPortal =
+    hostname.includes('student') ||
+    defaultPortal === 'student' ||
     route.startsWith('/student') ||
     window.location.search.includes('portal=student') ||
     window.location.hash.includes('student');
