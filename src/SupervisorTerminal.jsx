@@ -403,12 +403,6 @@ export default class SupervisorTerminal extends React.Component {
                   </div>
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={this.handlePrint}
-                      className="bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold px-3 py-1.5 rounded text-xs font-mono transition-colors"
-                    >
-                      🖨️ PRINT QUESTION PAPER
-                    </button>
-                    <button
                       onClick={this.handleSessionEnd}
                       className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded text-xs font-mono transition-colors"
                     >
@@ -422,26 +416,26 @@ export default class SupervisorTerminal extends React.Component {
                   <span>FORENSIC WATERMARK: {centerCode} | DEV-MAC:A1:B2:C3 | IP:127.0.0.1 | UNLOCKED: {unlockedTimestamp || 'LIVE'}</span>
                 </div>
 
-                {/* Decrypted Exam Paper Content with Anti-Tamper Overlay */}
-                <div
-                  className="relative bg-slate-950 p-6 sm:p-8 rounded-xl border border-slate-800 font-mono text-sm space-y-4 overflow-hidden printable-paper select-none"
-                  onContextMenu={(e) => e.preventDefault()}
-                >
-                  {/* Dynamic Forensic Watermark Background */}
-                  <div className="absolute inset-0 pointer-events-none select-none flex flex-col justify-around opacity-15 rotate-[-25deg] transform scale-125 z-10 text-[10px] text-cyan-400 font-bold tracking-widest leading-relaxed">
-                    {Array.from({ length: 6 }).map((_, i) => (
-                      <div key={i} className="whitespace-nowrap">
-                        CONFIDENTIAL — {centerCode} | DEV-MAC:A1:B2:C3 | IP:127.0.0.1 | {unlockedTimestamp || 'STAMPED'} — CONFIDENTIAL
-                      </div>
-                    ))}
+                {/* Direct Student Transmission Confirmation Card (Question Paper Text Hidden From Supervisor) */}
+                <div className="bg-emerald-950/60 border border-emerald-800 p-6 rounded-xl space-y-4 font-mono shadow-lg">
+                  <div className="flex items-center justify-between border-b border-emerald-900/80 pb-3 flex-wrap gap-2">
+                    <div className="flex items-center gap-2 text-emerald-400 font-bold text-base">
+                      <span>✅ QUESTION PAPER DECRYPTED & TRANSMITTED DIRECTLY TO STUDENT TERMINALS</span>
+                    </div>
+                    <span className="bg-emerald-900 text-emerald-300 border border-emerald-700 px-3 py-1 rounded font-bold text-xs">
+                      ● TRANSMITTED TO HALL DESKS
+                    </span>
                   </div>
 
-                  <h3 className="font-bold text-cyan-400 border-b border-slate-800 pb-3 relative z-20 text-base">
-                    CENTRAL UNIVERSITY EXAMINATION 2026 — SUBJECT: {subjectCode}
-                  </h3>
-                  <p className="relative z-20 text-slate-400 text-xs">Instructions: All questions are compulsory. Total marks: 100.</p>
-                  <div className="space-y-3 text-slate-200 py-3 relative z-20 leading-relaxed">
-                    {decryptedContent.split('\n').map((line, index) => (line.trim() ? <p key={index}>{line}</p> : null))}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs text-slate-300 bg-slate-950 p-4 rounded-lg border border-slate-800">
+                    <div>Subject Code: <strong className="text-amber-400">{subjectCode}</strong></div>
+                    <div>Exam Center: <strong className="text-cyan-400">{centerCode}</strong></div>
+                    <div>Decryption Stamping: <span className="text-slate-400">{unlockedTimestamp || 'STAMPED & VERIFIED'}</span></div>
+                    <div>Security Protocol: <span className="text-emerald-400">DIRECT KIOSK DELIVERY</span></div>
+                  </div>
+
+                  <div className="p-3 bg-slate-900/90 border border-slate-800 rounded text-xs text-slate-400 leading-relaxed">
+                    🔒 <strong>SECURITY COMPLIANCE DIRECTIVE:</strong> For maximum examination integrity, raw question paper content is strictly hidden from the supervisor terminal and delivered directly to authenticated student kiosk terminals in the examination hall.
                   </div>
                 </div>
 
@@ -517,48 +511,6 @@ export default class SupervisorTerminal extends React.Component {
                       ))}
                     </div>
                   )}
-                </div>
-
-                {/* Live Audit Log Viewer */}
-                <div className="bg-slate-950 border border-slate-800 rounded-xl p-5 space-y-4 no-print shadow-lg">
-                  <div className="flex items-center justify-between gap-4 border-b border-slate-800 pb-3">
-                    <div>
-                      <h4 className="text-sm font-bold text-cyan-400 uppercase tracking-wide">Live Audit Trail</h4>
-                      <p className="text-xs text-slate-400">Cryptographic and security log events fetched from Python backend.</p>
-                    </div>
-                    <button
-                      onClick={this.loadAuditLogs}
-                      className="bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 px-3 py-1.5 rounded-lg text-xs font-semibold font-mono transition-colors"
-                    >
-                      {auditLoading ? 'REFRESHING...' : 'REFRESH LOGS'}
-                    </button>
-                  </div>
-
-                  {auditError && (
-                    <div className="bg-red-950/80 border border-red-800 text-red-200 px-4 py-3 rounded-lg text-sm font-mono">
-                      [LOG ERROR] {auditError}
-                    </div>
-                  )}
-
-                  {!auditError && auditLogs.length === 0 && !auditLoading && (
-                    <p className="text-sm text-slate-500 font-mono">No audit events were returned by the backend yet.</p>
-                  )}
-
-                  <div className="space-y-3 max-h-72 overflow-auto pr-1">
-                    {auditLogs.map((log) => (
-                      <div key={log.log_id ?? `${log.timestamp}-${log.action_type}`} className="border border-slate-800/80 rounded-lg bg-slate-900/70 p-3.5 text-sm font-mono space-y-1">
-                        <div className="flex flex-wrap items-center gap-2 text-slate-300">
-                          <span className="text-emerald-400 font-bold">{log.action_type}</span>
-                          <span className="text-slate-600">|</span>
-                          <span className="text-slate-400 text-xs">{log.timestamp}</span>
-                        </div>
-                        <div className="text-slate-400 text-xs">
-                          User: {log.user_id ?? 'n/a'} | Center: {log.center_id ?? 'n/a'} | IP: {log.ip_address ?? 'n/a'}
-                        </div>
-                        {log.details && <div className="text-slate-500 text-xs">{log.details}</div>}
-                      </div>
-                    ))}
-                  </div>
                 </div>
               </div>
             )}

@@ -12,6 +12,7 @@ export default class StudentTerminal extends React.Component {
       studentCenterCode: 'CTR-101',
       studentSubjectCode: 'CS-602',
       studentPaperContent: '',
+      studentPhotoUrl: null,
       studentUnlocked: false,
       studentLoading: false,
       studentError: '',
@@ -214,6 +215,7 @@ export default class StudentTerminal extends React.Component {
       studentCenterCode,
       studentSubjectCode,
       studentPaperContent,
+      studentPhotoUrl,
       studentUnlocked,
       studentLoading,
       studentError,
@@ -225,27 +227,62 @@ export default class StudentTerminal extends React.Component {
     return (
       <div className="min-h-screen bg-slate-900 text-slate-100 p-6 flex flex-col items-center font-sans select-none" style={{ userSelect: 'none', WebkitUserSelect: 'none' }}>
         <div className="w-full max-w-4xl bg-slate-800 border border-slate-700 rounded-lg shadow-xl overflow-hidden">
-          {/* Header */}
+          {/* Header Bar */}
           <div className="bg-slate-950 px-6 py-4 flex flex-wrap justify-between items-center border-b border-slate-700 gap-4">
             <div>
               <h1 className="font-bold text-lg tracking-wide text-emerald-400">STUDENT SECURE KIOSK TERMINAL</h1>
               <p className="text-xs text-slate-400 font-mono">Standalone Client Examination Reader Terminal</p>
             </div>
             <div className="flex items-center gap-2 bg-slate-900 px-3 py-1.5 rounded border border-slate-800 text-xs font-mono text-emerald-400 font-bold">
-              <span>● CLIENT CLIENT ONLINE</span>
+              <span>● CLIENT ONLINE</span>
             </div>
           </div>
 
           <div className="p-8">
             {!studentUnlocked ? (
-              <div className="max-w-lg mx-auto bg-slate-950 p-6 rounded-lg border border-emerald-800/80 space-y-5">
-                <div className="border-b border-slate-800 pb-3">
-                  <h2 className="text-lg font-bold text-emerald-400 uppercase tracking-wide flex items-center gap-2">
-                    👨‍🎓 Student Terminal Authorization
-                  </h2>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Enter Roll Number and Desk ID to load your question paper in locked kiosk mode.
-                  </p>
+              <div className="max-w-xl mx-auto bg-slate-950 p-6 rounded-lg border border-emerald-800/80 space-y-5">
+                <div className="flex items-start justify-between border-b border-slate-800 pb-4 gap-4">
+                  <div>
+                    <h2 className="text-lg font-bold text-emerald-400 uppercase tracking-wide flex items-center gap-2">
+                      👨‍🎓 Student Terminal Authorization
+                    </h2>
+                    <p className="text-xs text-slate-400 mt-1">
+                      Enter Roll Number and Desk ID to load your question paper in locked kiosk mode.
+                    </p>
+                  </div>
+
+                  {/* Single 3:4 Aspect Ratio Passport Photo Frame (10% Incremented 106px x 142px, Right-Aligned) */}
+                  <div
+                    className="relative bg-slate-900 border-2 border-slate-700 rounded-sm overflow-hidden shadow-lg flex flex-col items-center justify-center shrink-0 ml-auto"
+                    style={{ width: '106px', height: '142px', minWidth: '106px', minHeight: '142px', maxWidth: '106px', maxHeight: '142px' }}
+                    title="Student Passport Photo (3:4 Ratio)"
+                  >
+                    {studentPhotoUrl ? (
+                      <img
+                        src={studentPhotoUrl}
+                        alt="Student Passport Photo"
+                        className="w-full h-full object-cover aspect-[3/4]"
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
+                    ) : (
+                      <div
+                        className="w-full h-full flex flex-col items-center justify-center bg-[#f4ebd0] text-slate-800 p-1 text-center select-none"
+                        style={{ width: '100%', height: '100%' }}
+                      >
+                        <svg
+                          width="48"
+                          height="48"
+                          style={{ width: '48px', height: '48px', maxWidth: '48px', maxHeight: '48px' }}
+                          className="text-slate-700 mb-0.5 opacity-85 shrink-0"
+                          fill="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
+                        </svg>
+                        <span className="text-[10px] font-bold text-slate-800 tracking-wider font-mono uppercase shrink-0">PHOTO (3:4)</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {studentError && (

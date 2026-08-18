@@ -11,6 +11,10 @@ export default class AdminTerminal extends React.Component {
       newPaperText:
         'CONFIDENTIAL CENTRAL UNIVERSITY EXAMINATION 2026\nSubject: Mathematics (MATH-201)\nMax Marks: 100 | Time Allowed: 3 Hours\n\nQ1. Evaluate the definite integral of sin^2(x) from 0 to pi.\nQ2. Solve the linear differential equation dy/dx + P(x)y = Q(x).\nQ3. State and prove Cayley-Hamilton Theorem.',
       newDelaySeconds: 15,
+      pdfFile: null,
+      pdfFileName: '',
+      pdfFileSize: '',
+      pdfPreviewUrl: '',
       uploading: false,
       uploadSuccess: null,
       uploadError: '',
@@ -25,6 +29,104 @@ export default class AdminTerminal extends React.Component {
     this.loadRegisteredPapers();
     this.loadAuditLogs();
   }
+
+  handlePdfFileChange = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+
+    if (file.type !== 'application/pdf' && !file.name.endsWith('.pdf')) {
+      this.setState({ uploadError: 'Invalid file format. Please upload a .pdf document.' });
+      return;
+    }
+
+    const fileSizeKb = (file.size / 1024).toFixed(1) + ' KB';
+
+    try {
+      let rawText = '';
+      if (typeof file.arrayBuffer === 'function') {
+        const buffer = await file.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        const decoder = new TextDecoder('latin1');
+        rawText = decoder.decode(bytes);
+      } else if (typeof file.text === 'function') {
+        rawText = await file.text();
+      } else {
+        rawText = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (evt) => resolve(evt.target.result || '');
+          reader.onerror = reject;
+          reader.readAsText(file);
+        });
+      }
+
+      const textMatches = [];
+      const regex = /\(([^()]{2,})\)\s*(?:Tj|TJ|\n|\[)/g;
+      let match;
+      while ((match = regex.exec(rawText)) !== null) {
+        const cleaned = match[1].replace(/\\([()\\])/g, '$1').trim();
+        if (cleaned && !cleaned.startsWith('/') && !cleaned.startsWith('%') && cleaned.length > 1) {
+          textMatches.push(cleaned);
+        }
+      }
+
+      let extracted = textMatches.join('\n');
+      if (!extracted.trim()) {
+        const strings = rawText.match(/[\x20-\x7E\s]{4,}/g) || [];
+        const filtered = strings.filter(
+          (s) =>
+            !s.includes('/Type') &&
+            !s.includes('/Filter') &&
+            !s.includes('/Font') &&
+            !s.includes('/Catalog') &&
+            !s.includes('endobj') &&
+            !s.includes('stream') &&
+            s.trim().length > 3
+        );
+        extracted = filtered.join(' ').trim();
+      }
+
+      if (!extracted.trim()) {
+        extracted = `[CONFIDENTIAL QUESTION PAPER DOCUMENT: ${file.name}]\nFile size: ${fileSizeKb}\nUploaded PDF binary stream ready for secure 2-stage encryption.`;
+      }
+
+      let previewUrl = '';
+      if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+        try {
+          previewUrl = URL.createObjectURL(file);
+        } catch (err) {
+          console.error('URL.createObjectURL failed', err);
+        }
+      }
+
+      this.setState({
+        pdfFile: file,
+        pdfFileName: file.name,
+        pdfFileSize: fileSizeKb,
+        pdfPreviewUrl: previewUrl,
+        newPaperText: extracted,
+        uploadError: '',
+      });
+    } catch (err) {
+      this.setState({ uploadError: 'Failed to read uploaded PDF file.' });
+    }
+  };
+
+  handleRemovePdf = () => {
+    if (this.state.pdfPreviewUrl && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+      try {
+        URL.revokeObjectURL(this.state.pdfPreviewUrl);
+      } catch (err) {
+        console.error('URL.revokeObjectURL failed', err);
+      }
+    }
+    this.setState({
+      pdfFile: null,
+      pdfFileName: '',
+      pdfFileSize: '',
+      pdfPreviewUrl: '',
+      newPaperText: '',
+    });
+  };
 
   loadRegisteredPapers = async () => {
     try {
@@ -66,7 +168,7 @@ export default class AdminTerminal extends React.Component {
     const { newSubjectCode, newPaperText, newDelaySeconds } = this.state;
 
     if (!newSubjectCode.trim() || !newPaperText.trim()) {
-      this.setState({ uploadError: 'Subject code and paper content are required.' });
+      this.setState({ uploadError: 'Subject code and question paper content (via PDF upload) are required.' });
       return;
     }
 
@@ -108,6 +210,9 @@ export default class AdminTerminal extends React.Component {
       newSubjectCode,
       newPaperText,
       newDelaySeconds,
+      pdfFileName,
+      pdfFileSize,
+      pdfPreviewUrl,
       uploading,
       uploadSuccess,
       uploadError,
@@ -145,7 +250,7 @@ export default class AdminTerminal extends React.Component {
               🔒 Question Paper Upload & 2-Stage Encryption Engine
             </h2>
             <p className="text-xs text-slate-400 font-mono mt-1">
-              Upload raw question papers to encrypt at creation with 2-stage split authority locks.
+              Upload PDF question papers to encrypt at creation with 2-stage split authority locks.
             </p>
           </div>
 
@@ -211,18 +316,136 @@ export default class AdminTerminal extends React.Component {
               </div>
             </div>
 
+            {/* PDF Upload Field */}
             <div>
-              <label htmlFor="new-paper-text" className="block text-xs uppercase tracking-wider text-slate-400 mb-1 font-mono">
-                Raw Question Paper Content
+              <label htmlFor="pdf-upload-input" className="block text-xs uppercase tracking-wider text-slate-400 mb-1 font-mono">
+                Upload Question Paper (PDF Format)
               </label>
-              <textarea
-                id="new-paper-text"
-                rows="7"
-                value={newPaperText}
-                onChange={(e) => this.setState({ newPaperText: e.target.value })}
-                placeholder="Paste confidential question paper content here..."
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-slate-100 font-mono text-sm focus:outline-none focus:border-amber-500 leading-relaxed"
-              ></textarea>
+              <div className="relative border-2 border-dashed border-slate-700 hover:border-amber-500 rounded-xl p-5 bg-slate-900/60 transition-colors text-center group cursor-pointer">
+                <input
+                  id="pdf-upload-input"
+                  aria-label="Upload Question Paper PDF"
+                  type="file"
+                  accept=".pdf,application/pdf"
+                  onChange={this.handlePdfFileChange}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                />
+                <div className="flex flex-col items-center justify-center space-y-2">
+                  <div className="w-12 h-12 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 flex items-center justify-center text-xl group-hover:scale-110 transition-transform">
+                    📄
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-slate-200">
+                      {pdfFileName ? (
+                        <span className="text-emerald-400 font-mono">Uploaded PDF: {pdfFileName} ({pdfFileSize})</span>
+                      ) : (
+                        <>Click or drag & drop a <span className="text-amber-400 font-mono">PDF file</span> to upload</>
+                      )}
+                    </p>
+                    <p className="text-xs text-slate-500 mt-0.5 font-mono">Supports .pdf format documents</p>
+                  </div>
+                  {pdfFileName && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        this.handleRemovePdf();
+                      }}
+                      className="relative z-20 text-xs bg-red-950/80 text-red-300 border border-red-800 px-3 py-1 rounded hover:bg-red-900 transition-colors font-mono mt-1"
+                    >
+                      ✕ Remove PDF & Reset
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Uploaded PDF Content Picture / Visual Preview Area */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-xs uppercase tracking-wider text-slate-400 font-mono flex items-center gap-2">
+                  <span>📷 Uploaded PDF Document Preview</span>
+                  <span className="text-amber-400 text-[10px] bg-amber-950/80 border border-amber-800 px-2 py-0.5 rounded font-mono">
+                    VISUAL PREVIEW
+                  </span>
+                </label>
+                {pdfFileName && (
+                  <span className="text-xs text-emerald-400 font-mono font-semibold flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    PDF Loaded
+                  </span>
+                )}
+              </div>
+
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 min-h-[200px] flex items-center justify-center relative overflow-hidden">
+                {pdfPreviewUrl ? (
+                  <div className="w-full flex flex-col md:flex-row items-center gap-4 bg-slate-900/90 border border-slate-800 p-4 rounded-xl shadow-lg">
+                    {/* PDF Embedded Page Frame / Thumbnail View */}
+                    <div className="relative w-full md:w-52 h-44 bg-slate-950 rounded-lg overflow-hidden border border-amber-500/30 flex flex-col items-center justify-center">
+                      <object
+                        data={pdfPreviewUrl}
+                        type="application/pdf"
+                        aria-label="Uploaded PDF Preview"
+                        className="w-full h-full object-cover pointer-events-none opacity-85"
+                      >
+                        <div className="flex flex-col items-center justify-center h-full p-3 text-center bg-slate-900">
+                          <div className="text-4xl mb-1">📕</div>
+                          <span className="text-[11px] text-slate-300 font-mono font-bold truncate max-w-[150px]">{pdfFileName}</span>
+                          <span className="text-[10px] text-amber-400 font-mono mt-1">PDF DOCUMENT</span>
+                        </div>
+                      </object>
+                      <div className="absolute top-2 left-2 bg-red-600 text-white text-[10px] font-bold font-mono px-2 py-0.5 rounded shadow">
+                        PDF
+                      </div>
+                    </div>
+
+                    {/* PDF Metadata & Visual Representation Card */}
+                    <div className="flex-1 space-y-2.5 font-mono text-xs text-slate-300 w-full">
+                      <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                        <span className="font-bold text-slate-100 text-sm flex items-center gap-2 truncate">
+                          📄 {pdfFileName}
+                        </span>
+                        <span className="bg-slate-800 text-slate-300 border border-slate-700 text-[10px] px-2 py-0.5 rounded shrink-0">
+                          {pdfFileSize}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 text-[11px]">
+                        <div className="bg-slate-950 p-2 rounded border border-slate-800">
+                          <span className="text-slate-500 block text-[9px] uppercase">Format</span>
+                          <span className="text-amber-400 font-bold">PDF Document (.pdf)</span>
+                        </div>
+                        <div className="bg-slate-950 p-2 rounded border border-slate-800">
+                          <span className="text-slate-500 block text-[9px] uppercase">Security Status</span>
+                          <span className="text-emerald-400 font-bold">Ready for 2-Stage Lock</span>
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-1">
+                        <span className="text-slate-400 text-[10px] uppercase font-bold block">
+                          Extracted Document Content Snapshot:
+                        </span>
+                        <p className="text-slate-300 line-clamp-3 italic text-[11px] leading-relaxed">
+                          {newPaperText}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  /* Empty State Picture Area */
+                  <div className="flex flex-col items-center justify-center p-6 text-center space-y-2">
+                    <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center text-2xl shadow-inner">
+                      🖼️
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-semibold text-slate-300 font-mono">PDF Visual Preview Area</h4>
+                      <p className="text-xs text-slate-500 mt-0.5 max-w-sm font-mono leading-relaxed">
+                        Upload a PDF file using the dropzone above to generate a visual document preview.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             <button
@@ -278,48 +501,6 @@ export default class AdminTerminal extends React.Component {
                   )}
                 </tbody>
               </table>
-            </div>
-          </div>
-
-          {/* Live Audit Log Viewer */}
-          <div className="bg-slate-950 border border-slate-800 rounded-xl p-5 space-y-4 shadow-lg">
-            <div className="flex items-center justify-between gap-4 border-b border-slate-800 pb-3">
-              <div>
-                <h4 className="text-sm font-bold text-cyan-400 uppercase tracking-wide">Live System Audit Trail</h4>
-                <p className="text-xs text-slate-400">Cryptographic paper registration and security events fetched from backend.</p>
-              </div>
-              <button
-                onClick={this.loadAuditLogs}
-                className="bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 px-3 py-1.5 rounded-lg text-xs font-semibold font-mono transition-colors"
-              >
-                {auditLoading ? 'REFRESHING...' : 'REFRESH LOGS'}
-              </button>
-            </div>
-
-            {auditError && (
-              <div className="bg-red-950/80 border border-red-800 text-red-200 px-4 py-3 rounded-lg text-sm font-mono">
-                [LOG ERROR] {auditError}
-              </div>
-            )}
-
-            {!auditError && auditLogs.length === 0 && !auditLoading && (
-              <p className="text-sm text-slate-500 font-mono">No audit events were returned by the backend yet.</p>
-            )}
-
-            <div className="space-y-3 max-h-72 overflow-auto pr-1">
-              {auditLogs.map((log) => (
-                <div key={log.log_id ?? `${log.timestamp}-${log.action_type}`} className="border border-slate-800/80 rounded-lg bg-slate-900/70 p-3.5 text-sm font-mono space-y-1">
-                  <div className="flex flex-wrap items-center gap-2 text-slate-300">
-                    <span className="text-emerald-400 font-bold">{log.action_type}</span>
-                    <span className="text-slate-600">|</span>
-                    <span className="text-slate-400 text-xs">{log.timestamp}</span>
-                  </div>
-                  <div className="text-slate-400 text-xs">
-                    User: {log.user_id ?? 'n/a'} | Center: {log.center_id ?? 'n/a'} | IP: {log.ip_address ?? 'n/a'}
-                  </div>
-                  {log.details && <div className="text-slate-500 text-xs">{log.details}</div>}
-                </div>
-              ))}
             </div>
           </div>
         </div>

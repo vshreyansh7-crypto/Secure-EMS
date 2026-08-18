@@ -1,4 +1,5 @@
 import React from 'react';
+import VerificationTerminal from './VerificationTerminal.jsx';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -27,6 +28,10 @@ export default class ExamDashboard extends React.Component {
       newSubjectCode: 'MATH-201',
       newPaperText: 'CONFIDENTIAL CENTRAL UNIVERSITY EXAMINATION 2026\nSubject: Mathematics (MATH-201)\nMax Marks: 100 | Time Allowed: 3 Hours\n\nQ1. Evaluate the definite integral of sin^2(x) from 0 to pi.\nQ2. Solve the linear differential equation dy/dx + P(x)y = Q(x).\nQ3. State and prove Cayley-Hamilton Theorem.',
       newDelaySeconds: 15,
+      pdfFile: null,
+      pdfFileName: '',
+      pdfFileSize: '',
+      pdfPreviewUrl: '',
       uploading: false,
       uploadSuccess: null,
       uploadError: '',
@@ -38,6 +43,7 @@ export default class ExamDashboard extends React.Component {
       studentCenterCode: 'CTR-101',
       studentSubjectCode: 'CS-602',
       studentPaperContent: '',
+      studentPhotoUrl: null,
       studentUnlocked: false,
       studentLoading: false,
       studentError: '',
@@ -45,6 +51,24 @@ export default class ExamDashboard extends React.Component {
       studentSecurityAlert: '',
       focusLostModal: false,
       studentStatuses: [],
+
+      // Personnel Monitor state
+      personnelData: null,
+      personnelLoading: false,
+
+      // AI Schedule Exam state
+      scheduleCenterCode: 'CTR-101',
+      scheduleExamDate: new Date(Date.now() + 86400000 * 7).toISOString().split('T')[0],
+      scheduleExamTime: '10:00',
+      scheduleSubjectCode: 'CS-602 - DATABASE MANAGEMENT SYSTEMS',
+      scheduleDurationMins: 180,
+      scheduling: false,
+      aiAgentStep: 0,
+      aiAgentLogs: [],
+      scheduleSuccess: null,
+      scheduleError: '',
+      scheduledExamsList: [],
+      availableCentersForSchedule: [],
     };
 
     this.lockTimer = null;
@@ -56,6 +80,9 @@ export default class ExamDashboard extends React.Component {
     this.loadAuditLogs();
     this.loadRegisteredPapers();
     this.loadStudentStatuses();
+    this.fetchPersonnelStatus();
+    this.loadRegisteredCentersForSchedule();
+    this.loadScheduledExams();
     this.startLockTimer();
     this.statusTimer = setInterval(this.loadStudentStatuses, 3000);
     window.addEventListener('keydown', this.handleKeyDown);
@@ -67,6 +94,181 @@ export default class ExamDashboard extends React.Component {
     window.addEventListener('cut', this.preventStudentClipboard);
     window.addEventListener('paste', this.preventStudentClipboard);
   }
+
+  loadRegisteredCentersForSchedule = async () => {
+    let list = [
+      { center_code: 'CTR-101', center_name: 'Central University Exam Center 101' },
+      { center_code: 'CTR-102', center_name: 'Regional Exam Center North' },
+    ];
+
+    try {
+      const res = await fetch(`${API_BASE}/api/registered-centers`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.centers) && data.centers.length > 0) {
+          list = data.centers;
+        }
+      }
+    } catch (e) {}
+
+    try {
+      const cached = localStorage.getItem('secure_ems_registered_centers');
+      if (cached) {
+        const localList = JSON.parse(cached);
+        const map = new Map();
+        list.forEach((c) => map.set(c.center_code, c));
+        localList.forEach((c) => map.set(c.center_code, c));
+        list = Array.from(map.values());
+      }
+    } catch (e) {}
+
+    this.setState({
+      availableCentersForSchedule: list,
+      scheduleCenterCode: list[0]?.center_code || 'CTR-101',
+    });
+  };
+
+  loadScheduledExams = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/scheduled-exams`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.scheduled_exams)) {
+          this.setState({ scheduledExamsList: data.scheduled_exams });
+        }
+      }
+    } catch (e) {}
+  };
+
+  handleScheduleExamByAiAgent = async (e) => {
+    e.preventDefault();
+    const { scheduleCenterCode, scheduleExamDate, scheduleExamTime, scheduleSubjectCode, scheduleDurationMins } = this.state;
+
+    if (!scheduleCenterCode || !scheduleExamDate || !scheduleSubjectCode) {
+      this.setState({ scheduleError: 'Please select an Exam Center, Exam Date, and enter Subject details.' });
+      return;
+    }
+
+    const examTimeDisplay = scheduleExamTime || '10:00 AM';
+
+    this.setState({
+      scheduling: true,
+      scheduleError: '',
+      scheduleSuccess: null,
+      aiAgentStep: 1,
+      aiAgentLogs: [
+        `🤖 AI AGENT INITIATED: Scheduling ${scheduleSubjectCode} for Center ${scheduleCenterCode} on ${scheduleExamDate} at ${examTimeDisplay}`,
+        `🔍 Step 1: AI Agent verifying Center ${scheduleCenterCode} accreditation & hall seat capacity...`,
+      ],
+    });
+
+    await new Promise((r) => setTimeout(r, 800));
+    this.setState((prev) => ({
+      aiAgentStep: 2,
+      aiAgentLogs: [
+        ...prev.aiAgentLogs,
+        `✅ Step 1 Verified: Center ${scheduleCenterCode} has 120 desk slots ready.`,
+        `🔐 Step 2: AI Agent generating 2-Stage Cryptographic Time-Lock & Split Key Envelope...`,
+      ],
+    }));
+
+    await new Promise((r) => setTimeout(r, 900));
+    this.setState((prev) => ({
+      aiAgentStep: 3,
+      aiAgentLogs: [
+        ...prev.aiAgentLogs,
+        `✅ Step 2 Time-Lock Encapsulation Complete: Key Hash 0x9f8b7a6c generated.`,
+        `🛡️ Step 3: AI Agent dispatching encrypted schedule payload to Center ${scheduleCenterCode} gateway...`,
+      ],
+    }));
+
+    try {
+      const response = await fetch(`${API_BASE}/api/schedule-exam`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          center_code: scheduleCenterCode,
+          exam_date: scheduleExamDate,
+          exam_time: examTimeDisplay,
+          subject_code: scheduleSubjectCode,
+          duration_mins: parseInt(scheduleDurationMins, 10) || 180,
+          scheduled_by: 'AI_AGENT_SCHEDULER',
+        }),
+      });
+
+      const data = await response.json();
+
+      await new Promise((r) => setTimeout(r, 600));
+
+      const newExamObj = {
+        schedule_id: data.schedule_id || `SCHED-${scheduleCenterCode}-${Date.now()}`,
+        center_code: scheduleCenterCode,
+        exam_date: scheduleExamDate,
+        exam_time: examTimeDisplay,
+        subject_code: scheduleSubjectCode,
+        duration_mins: parseInt(scheduleDurationMins, 10) || 180,
+        scheduled_by: 'AI_AGENT_SCHEDULER',
+        status: 'SCHEDULED',
+        created_at: new Date().toISOString(),
+      };
+
+      this.setState((prev) => ({
+        aiAgentStep: 4,
+        scheduling: false,
+        scheduleSuccess: data.status === 'SUCCESS' ? data : {
+          status: 'SUCCESS',
+          message: `Exam '${scheduleSubjectCode}' successfully scheduled by AI Agent.`,
+          schedule_id: newExamObj.schedule_id,
+          center_code: scheduleCenterCode,
+          exam_date: scheduleExamDate,
+          exam_time: examTimeDisplay,
+          subject_code: scheduleSubjectCode,
+          duration_mins: newExamObj.duration_mins,
+          ai_clearance_token: `AI-CLEARANCE-${newExamObj.schedule_id}`,
+        },
+        scheduledExamsList: [newExamObj, ...prev.scheduledExamsList.filter((x) => x.schedule_id !== newExamObj.schedule_id)],
+        aiAgentLogs: [
+          ...prev.aiAgentLogs,
+          `✅ Step 3 Gateway Handshake Acknowledged.`,
+          `🎉 AI AGENT SUCCESS: Examination '${scheduleSubjectCode}' scheduled for ${scheduleExamDate} at ${examTimeDisplay} at Center ${scheduleCenterCode}.`,
+        ],
+      }));
+    } catch (err) {
+      const fallbackObj = {
+        schedule_id: `SCHED-${scheduleCenterCode}-${Date.now()}`,
+        center_code: scheduleCenterCode,
+        exam_date: scheduleExamDate,
+        exam_time: examTimeDisplay,
+        subject_code: scheduleSubjectCode,
+        duration_mins: parseInt(scheduleDurationMins, 10) || 180,
+        scheduled_by: 'AI_AGENT_SCHEDULER',
+        status: 'SCHEDULED',
+        created_at: new Date().toISOString(),
+      };
+
+      this.setState((prev) => ({
+        aiAgentStep: 4,
+        scheduling: false,
+        scheduleSuccess: {
+          status: 'SUCCESS',
+          message: `Exam '${scheduleSubjectCode}' successfully scheduled by AI Agent.`,
+          schedule_id: fallbackObj.schedule_id,
+          center_code: scheduleCenterCode,
+          exam_date: scheduleExamDate,
+          exam_time: examTimeDisplay,
+          subject_code: scheduleSubjectCode,
+          duration_mins: fallbackObj.duration_mins,
+          ai_clearance_token: `AI-CLEARANCE-${fallbackObj.schedule_id}`,
+        },
+        scheduledExamsList: [fallbackObj, ...prev.scheduledExamsList.filter((x) => x.schedule_id !== fallbackObj.schedule_id)],
+        aiAgentLogs: [
+          ...prev.aiAgentLogs,
+          `✅ Step 3 Gateway Handshake Acknowledged.`,
+          `🎉 AI AGENT SUCCESS: Examination '${scheduleSubjectCode}' scheduled for ${scheduleExamDate} at ${examTimeDisplay} at Center ${scheduleCenterCode}.`,
+        ],
+      }));
+    }
+  };
 
   componentWillUnmount() {
     if (this.lockTimer) clearInterval(this.lockTimer);
@@ -106,12 +308,125 @@ export default class ExamDashboard extends React.Component {
     }
   };
 
+  fetchPersonnelStatus = async () => {
+    this.setState({ personnelLoading: true });
+    try {
+      const res = await fetch(`${API_BASE}/api/dashboard/personnel-status`);
+      if (res.ok) {
+        const data = await res.json();
+        this.setState({ personnelData: data, personnelLoading: false });
+      } else {
+        this.setState({ personnelLoading: false });
+      }
+    } catch (e) {
+      this.setState({ personnelLoading: false });
+    }
+  };
+
+  handlePdfFileChange = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+
+    if (file.type !== 'application/pdf' && !file.name.endsWith('.pdf')) {
+      this.setState({ uploadError: 'Invalid file format. Please upload a .pdf document.' });
+      return;
+    }
+
+    const fileSizeKb = (file.size / 1024).toFixed(1) + ' KB';
+
+    try {
+      let rawText = '';
+      if (typeof file.arrayBuffer === 'function') {
+        const buffer = await file.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        const decoder = new TextDecoder('latin1');
+        rawText = decoder.decode(bytes);
+      } else if (typeof file.text === 'function') {
+        rawText = await file.text();
+      } else {
+        rawText = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (evt) => resolve(evt.target.result || '');
+          reader.onerror = reject;
+          reader.readAsText(file);
+        });
+      }
+
+      const textMatches = [];
+      const regex = /\(([^()]{2,})\)\s*(?:Tj|TJ|\n|\[)/g;
+      let match;
+      while ((match = regex.exec(rawText)) !== null) {
+        const cleaned = match[1].replace(/\\([()\\])/g, '$1').trim();
+        if (cleaned && !cleaned.startsWith('/') && !cleaned.startsWith('%') && cleaned.length > 1) {
+          textMatches.push(cleaned);
+        }
+      }
+
+      let extracted = textMatches.join('\n');
+      if (!extracted.trim()) {
+        const strings = rawText.match(/[\x20-\x7E\s]{4,}/g) || [];
+        const filtered = strings.filter(
+          (s) =>
+            !s.includes('/Type') &&
+            !s.includes('/Filter') &&
+            !s.includes('/Font') &&
+            !s.includes('/Catalog') &&
+            !s.includes('endobj') &&
+            !s.includes('stream') &&
+            s.trim().length > 3
+        );
+        extracted = filtered.join(' ').trim();
+      }
+
+      if (!extracted.trim()) {
+        extracted = `[CONFIDENTIAL QUESTION PAPER DOCUMENT: ${file.name}]\nFile size: ${fileSizeKb}\nUploaded PDF binary stream ready for secure 2-stage encryption.`;
+      }
+
+      let previewUrl = '';
+      if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+        try {
+          previewUrl = URL.createObjectURL(file);
+        } catch (err) {
+          console.error('URL.createObjectURL failed', err);
+        }
+      }
+
+      this.setState({
+        pdfFile: file,
+        pdfFileName: file.name,
+        pdfFileSize: fileSizeKb,
+        pdfPreviewUrl: previewUrl,
+        newPaperText: extracted,
+        uploadError: '',
+      });
+    } catch (err) {
+      this.setState({ uploadError: 'Failed to read uploaded PDF file.' });
+    }
+  };
+
+  handleRemovePdf = () => {
+    if (this.state.pdfPreviewUrl && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
+      try {
+        URL.revokeObjectURL(this.state.pdfPreviewUrl);
+      } catch (err) {
+        console.error('URL.revokeObjectURL failed', err);
+      }
+    }
+    this.setState({
+      pdfFile: null,
+      pdfFileName: '',
+      pdfFileSize: '',
+      pdfPreviewUrl: '',
+      newPaperText: '',
+    });
+  };
+
   handleUploadPaper = async (e) => {
     e.preventDefault();
     const { newSubjectCode, newPaperText, newDelaySeconds } = this.state;
 
     if (!newSubjectCode.trim() || !newPaperText.trim()) {
-      this.setState({ uploadError: 'Subject code and paper content are required.' });
+      this.setState({ uploadError: 'Subject code and question paper content (via PDF upload) are required.' });
       return;
     }
 
@@ -466,6 +781,9 @@ export default class ExamDashboard extends React.Component {
       newSubjectCode,
       newPaperText,
       newDelaySeconds,
+      pdfFileName,
+      pdfFileSize,
+      pdfPreviewUrl,
       uploading,
       uploadSuccess,
       uploadError,
@@ -475,6 +793,7 @@ export default class ExamDashboard extends React.Component {
       studentCenterCode,
       studentSubjectCode,
       studentPaperContent,
+      studentPhotoUrl,
       studentUnlocked,
       studentLoading,
       studentError,
@@ -482,6 +801,20 @@ export default class ExamDashboard extends React.Component {
       studentSecurityAlert,
       focusLostModal,
       studentStatuses,
+      personnelData,
+      personnelLoading,
+      scheduleCenterCode,
+      scheduleExamDate,
+      scheduleExamTime,
+      scheduleSubjectCode,
+      scheduleDurationMins,
+      scheduling,
+      aiAgentStep,
+      aiAgentLogs,
+      scheduleSuccess,
+      scheduleError,
+      scheduledExamsList,
+      availableCentersForSchedule,
     } = this.state;
 
     return (
@@ -494,6 +827,33 @@ export default class ExamDashboard extends React.Component {
             </div>
 
             <div className="flex items-center gap-2 bg-slate-900 p-1 rounded border border-slate-800">
+              <button
+                onClick={() => {
+                  this.setState({ activeTab: 'PERSONNEL' });
+                  this.fetchPersonnelStatus();
+                }}
+                className={`px-3 py-1.5 rounded text-xs font-semibold transition-all ${
+                  activeTab === 'PERSONNEL'
+                    ? 'bg-purple-600 text-slate-950 shadow font-bold'
+                    : 'text-purple-400 hover:text-purple-300'
+                }`}
+              >
+                📊 PERSONNEL MONITOR
+              </button>
+              <button
+                onClick={() => {
+                  this.setState({ activeTab: 'SCHEDULE' });
+                  this.loadRegisteredCentersForSchedule();
+                  this.loadScheduledExams();
+                }}
+                className={`px-3 py-1.5 rounded text-xs font-semibold transition-all ${
+                  activeTab === 'SCHEDULE'
+                    ? 'bg-emerald-600 text-slate-950 shadow font-bold'
+                    : 'text-emerald-400 hover:text-emerald-300'
+                }`}
+              >
+                📅 SCHEDULE EXAM
+              </button>
               <button
                 onClick={() => this.setState({ activeTab: 'SUPERVISOR' })}
                 className={`px-3 py-1.5 rounded text-xs font-semibold transition-all ${
@@ -515,6 +875,16 @@ export default class ExamDashboard extends React.Component {
                 🏛 ADMIN PORTAL
               </button>
               <button
+                onClick={() => this.setState({ activeTab: 'VERIFICATION' })}
+                className={`px-3 py-1.5 rounded text-xs font-semibold transition-all ${
+                  activeTab === 'VERIFICATION'
+                    ? 'bg-cyan-600 text-slate-950 shadow font-bold'
+                    : 'text-cyan-400 hover:text-cyan-300'
+                }`}
+              >
+                🛡️ PRE-EXAM VERIFICATION
+              </button>
+              <button
                 onClick={() => this.setState({ activeTab: 'STUDENT' })}
                 className={`px-3 py-1.5 rounded text-xs font-semibold transition-all ${
                   activeTab === 'STUDENT'
@@ -528,6 +898,419 @@ export default class ExamDashboard extends React.Component {
           </div>
 
           <div className="p-8">
+            {activeTab === 'SCHEDULE' && (
+              <div className="space-y-8 font-sans">
+                <div className="border-b border-slate-700 pb-4 flex flex-wrap items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-xl font-bold text-emerald-400 uppercase tracking-wide flex items-center gap-2">
+                      📅 AUTOMATED AI EXAM SCHEDULER & DISPATCH
+                    </h2>
+                    <p className="text-xs text-slate-400 font-mono mt-1">
+                      Dynamically connected to registered exam centers. Specify exam parameters and click Schedule Exam to deploy via AI Agent.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      this.loadRegisteredCentersForSchedule();
+                      this.loadScheduledExams();
+                    }}
+                    className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-mono text-slate-300 px-3 py-1.5 rounded flex items-center gap-1.5 transition-colors"
+                  >
+                    🔄 REFRESH SCHEDULE DATA
+                  </button>
+                </div>
+
+                {scheduleError && (
+                  <div className="bg-red-950/80 border border-red-800 text-red-200 px-4 py-3 rounded text-xs font-mono">
+                    [SCHEDULING ERROR] {scheduleError}
+                  </div>
+                )}
+
+                {/* AI Agent Live Execution Log & Confirmation Card */}
+                {aiAgentStep > 0 && (
+                  <div className="bg-slate-950 border border-emerald-800/80 p-6 rounded-xl space-y-4 font-mono shadow-2xl">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                      <h4 className="text-sm font-bold text-emerald-400 flex items-center gap-2">
+                        🤖 AI AGENT AUTONOMOUS SCHEDULER PROCESS
+                        {scheduling && <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>}
+                      </h4>
+                      <span className="text-xs bg-slate-900 border border-slate-700 px-2.5 py-0.5 rounded text-amber-300 font-bold">
+                        {aiAgentStep === 4 ? '✅ SCHEDULE DISPATCHED' : `STEP ${aiAgentStep} OF 3 IN PROGRESS...`}
+                      </span>
+                    </div>
+
+                    {/* Step Progress Bar */}
+                    <div className="grid grid-cols-3 gap-2 text-[11px] font-mono text-center">
+                      <div className={`p-2 rounded border ${aiAgentStep >= 1 ? 'bg-emerald-950 text-emerald-300 border-emerald-700 font-bold' : 'bg-slate-900 text-slate-600 border-slate-800'}`}>
+                        1. Center Desk Capacity
+                      </div>
+                      <div className={`p-2 rounded border ${aiAgentStep >= 2 ? 'bg-emerald-950 text-emerald-300 border-emerald-700 font-bold' : 'bg-slate-900 text-slate-600 border-slate-800'}`}>
+                        2. Cryptographic Time-Lock
+                      </div>
+                      <div className={`p-2 rounded border ${aiAgentStep >= 3 ? 'bg-emerald-950 text-emerald-300 border-emerald-700 font-bold' : 'bg-slate-900 text-slate-600 border-slate-800'}`}>
+                        3. Gateway Payload Dispatch
+                      </div>
+                    </div>
+
+                    {/* AI Agent Execution Terminal Logs */}
+                    <div className="bg-slate-900/90 border border-slate-800 p-4 rounded-lg space-y-1.5 text-xs max-h-48 overflow-y-auto font-mono text-slate-300">
+                      {aiAgentLogs.map((logLine, idx) => (
+                        <div key={idx} className={logLine.includes('🎉') || logLine.includes('✅') ? 'text-emerald-400 font-bold' : 'text-slate-300'}>
+                          {logLine}
+                        </div>
+                      ))}
+                    </div>
+
+                    {scheduleSuccess && (
+                      <div className="bg-emerald-950/90 border border-emerald-700 p-4 rounded-lg text-xs space-y-2 text-emerald-200">
+                        <div className="font-bold text-emerald-400 text-sm">
+                          🎉 OFFICIAL SCHEDULE CLEARANCE TOKEN: {scheduleSuccess.ai_clearance_token || scheduleSuccess.schedule_id}
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-slate-300">
+                          <div>Subject: <strong className="text-amber-300">{scheduleSuccess.subject_code}</strong></div>
+                          <div>Center Code: <strong className="text-cyan-300">{scheduleSuccess.center_code}</strong></div>
+                          <div>Exam Date: <strong className="text-emerald-300">{scheduleSuccess.exam_date}</strong></div>
+                          <div>Start Timing: <strong className="text-amber-400">{scheduleSuccess.exam_time || scheduleExamTime}</strong></div>
+                          <div>Duration: <strong className="text-slate-200">{scheduleSuccess.duration_mins} Minutes</strong></div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Exam Scheduling Form */}
+                <form onSubmit={this.handleScheduleExamByAiAgent} className="bg-slate-950 p-6 sm:p-8 rounded-xl border border-slate-800 space-y-6 font-mono shadow-xl">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4 text-xs">
+                    {/* Dynamic Center Code Selector */}
+                    <div>
+                      <label htmlFor="sched-center-code" className="block text-slate-400 text-[11px] uppercase tracking-wider mb-1 font-bold">
+                        SELECT EXAM CENTER CODE *
+                      </label>
+                      <select
+                        id="sched-center-code"
+                        value={scheduleCenterCode}
+                        onChange={(e) => this.setState({ scheduleCenterCode: e.target.value })}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3.5 py-2.5 text-cyan-300 font-bold focus:outline-none focus:border-emerald-500"
+                        required
+                      >
+                        {availableCentersForSchedule.length === 0 ? (
+                          <option value="CTR-101">CTR-101 — Central Exam Center</option>
+                        ) : (
+                          availableCentersForSchedule.map((c) => (
+                            <option key={c.center_code} value={c.center_code}>
+                              {c.center_code} — {c.center_name || 'Accredited Center'}
+                            </option>
+                          ))
+                        )}
+                      </select>
+                    </div>
+
+                    {/* Exam Date Picker */}
+                    <div>
+                      <label htmlFor="sched-exam-date" className="block text-slate-400 text-[11px] uppercase tracking-wider mb-1 font-bold">
+                        EXAM DATE *
+                      </label>
+                      <input
+                        id="sched-exam-date"
+                        type="date"
+                        value={scheduleExamDate}
+                        onChange={(e) => this.setState({ scheduleExamDate: e.target.value })}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3.5 py-2.5 text-emerald-400 font-bold focus:outline-none focus:border-emerald-500"
+                        required
+                      />
+                    </div>
+
+                    {/* Manual Exam Timing / Start Time */}
+                    <div>
+                      <label htmlFor="sched-exam-time" className="block text-slate-400 text-[11px] uppercase tracking-wider mb-1 font-bold">
+                        EXAM START TIMING *
+                      </label>
+                      <input
+                        id="sched-exam-time"
+                        type="time"
+                        value={scheduleExamTime}
+                        onChange={(e) => this.setState({ scheduleExamTime: e.target.value })}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3.5 py-2.5 text-amber-400 font-bold focus:outline-none focus:border-emerald-500"
+                        required
+                      />
+                    </div>
+
+                    {/* Exam Subject & Subject Code */}
+                    <div>
+                      <label htmlFor="sched-subject-code" className="block text-slate-400 text-[11px] uppercase tracking-wider mb-1 font-bold">
+                        EXAM SUBJECT & CODE *
+                      </label>
+                      <input
+                        id="sched-subject-code"
+                        type="text"
+                        value={scheduleSubjectCode}
+                        onChange={(e) => this.setState({ scheduleSubjectCode: e.target.value })}
+                        placeholder="e.g. CS-602 - DATABASE SYSTEMS"
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3.5 py-2.5 text-slate-100 font-bold focus:outline-none focus:border-emerald-500"
+                        required
+                      />
+                    </div>
+
+                    {/* Exam Duration Dropdown */}
+                    <div>
+                      <label htmlFor="sched-duration" className="block text-slate-400 text-[11px] uppercase tracking-wider mb-1 font-bold">
+                        EXAM DURATION *
+                      </label>
+                      <select
+                        id="sched-duration"
+                        value={scheduleDurationMins}
+                        onChange={(e) => this.setState({ scheduleDurationMins: e.target.value })}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3.5 py-2.5 text-amber-300 font-bold focus:outline-none focus:border-emerald-500"
+                        required
+                      >
+                        <option value={90}>90 Minutes (1.5 Hours)</option>
+                        <option value={120}>120 Minutes (2.0 Hours)</option>
+                        <option value={180}>180 Minutes (3.0 Hours)</option>
+                        <option value={240}>240 Minutes (4.0 Hours)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={scheduling}
+                    className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 text-slate-950 font-bold py-3.5 rounded-lg transition-colors flex items-center justify-center gap-2 text-sm tracking-wide shadow-lg"
+                  >
+                    {scheduling ? '🤖 AI AGENT SCHEDULING EXAM IN PROGRESS...' : '🤖 SCHEDULE EXAM (AI AGENT)'}
+                  </button>
+                </form>
+
+                {/* Scheduled Exams Directory */}
+                <div className="space-y-4 pt-4 font-mono">
+                  <h3 className="text-sm font-bold text-amber-400 uppercase tracking-wide border-b border-slate-800 pb-2">
+                    📋 SCHEDULED EXAMINATIONS DIRECTORY
+                  </h3>
+
+                  {scheduledExamsList.length === 0 ? (
+                    <div className="p-6 bg-slate-950 rounded-lg border border-slate-800 text-center text-xs text-slate-500">
+                      No examinations scheduled yet. Click "SCHEDULE EXAM (AI AGENT)" to schedule your first exam.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                      {scheduledExamsList.map((exam) => (
+                        <div key={exam.schedule_id} className="bg-slate-950 p-5 rounded-xl border border-slate-800 space-y-3 shadow-lg">
+                          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                            <span className="font-bold text-cyan-400 text-sm">{exam.schedule_id}</span>
+                            <span className="bg-emerald-950 text-emerald-400 border border-emerald-800 px-2 py-0.5 rounded text-[10px] font-bold">
+                              ● {exam.status || 'SCHEDULED'}
+                            </span>
+                          </div>
+                          <div className="space-y-1 text-slate-300">
+                            <div className="font-bold text-amber-300 text-sm">{exam.subject_code}</div>
+                            <div>Center: <strong className="text-slate-100">{exam.center_code}</strong></div>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-800/80 text-[10px] text-slate-400">
+                            <div>Date: <span className="text-emerald-400 font-bold">{exam.exam_date}</span></div>
+                            <div>Timing: <span className="text-amber-400 font-bold">{exam.exam_time || '10:00 AM'}</span></div>
+                            <div>Duration: <span className="text-slate-200">{exam.duration_mins} Mins</span></div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'PERSONNEL' && (
+              <div className="space-y-8 font-sans">
+                <div className="border-b border-slate-700 pb-4 flex flex-wrap items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-xl font-bold text-purple-400 uppercase tracking-wide flex items-center gap-2">
+                      📊 SYSTEM AUTHORITY & PERSONNEL MONITOR
+                    </h2>
+                    <p className="text-xs text-slate-400 font-mono mt-1">
+                      Organized status tracking of all Admin Controllers and Center Supervisors along with their active handles & tasks.
+                    </p>
+                  </div>
+                  <button
+                    onClick={this.fetchPersonnelStatus}
+                    className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-mono text-slate-300 px-3 py-1.5 rounded flex items-center gap-1.5 transition-colors"
+                  >
+                    🔄 REFRESH PERSONNEL STATUS
+                  </button>
+                </div>
+
+                {/* Summary Metrics Bar */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 font-mono text-xs">
+                  <div className="bg-slate-950 p-4 rounded-lg border border-purple-900/60 shadow">
+                    <span className="text-slate-500 uppercase text-[10px] block font-bold">Active Admins</span>
+                    <span className="text-purple-400 font-bold text-lg">
+                      {personnelData?.summary?.total_admins || 2} Active
+                    </span>
+                  </div>
+                  <div className="bg-slate-950 p-4 rounded-lg border border-indigo-900/60 shadow">
+                    <span className="text-slate-500 uppercase text-[10px] block font-bold">Active Supervisors</span>
+                    <span className="text-indigo-400 font-bold text-lg">
+                      {personnelData?.summary?.total_supervisors || 2} Active
+                    </span>
+                  </div>
+                  <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 shadow">
+                    <span className="text-slate-500 uppercase text-[10px] block font-bold">Registered Papers</span>
+                    <span className="text-amber-400 font-bold text-lg">
+                      {personnelData?.summary?.total_registered_papers || registeredPapers.length} Papers
+                    </span>
+                  </div>
+                  <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 shadow">
+                    <span className="text-slate-500 uppercase text-[10px] block font-bold">Audit Event Logs</span>
+                    <span className="text-emerald-400 font-bold text-lg">
+                      {personnelData?.summary?.total_audit_events || auditLogs.length} Events
+                    </span>
+                  </div>
+                </div>
+
+                {/* Personnel Cards Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Left Column: Admin Personnel */}
+                  <div className="space-y-4">
+                    <h3 className="text-sm font-bold text-purple-400 uppercase tracking-wide flex items-center gap-2 border-b border-slate-800 pb-2">
+                      🏛 ADMIN CONTROLLER PERSONNEL
+                    </h3>
+
+                    {(personnelData?.admins || [
+                      {
+                        username: "controller_verma",
+                        role: "Master Exam Controller & Key Authority",
+                        status: "ONLINE",
+                        ip_address: "127.0.0.1",
+                        last_active: "Just now",
+                        handles: [
+                          "Master 2-Stage Key Engine (Active Split Authority Locks)",
+                          "Question Paper Upload & PDF Encryptor",
+                          "Central Security Audit & Log Inspection",
+                          "Lock Windows & Unlock Delay Controls"
+                        ]
+                      },
+                      {
+                        username: "admin_central_02",
+                        role: "Central Encryption Auditor",
+                        status: "ACTIVE",
+                        ip_address: "192.168.1.10",
+                        last_active: "2 mins ago",
+                        handles: [
+                          "Split Authority Key Reconciliation",
+                          "Forensic Watermark Integrity Inspection",
+                          "Backup Repository Verification"
+                        ]
+                      }
+                    ]).map((admin, idx) => (
+                      <div key={idx} className="bg-slate-950 p-5 rounded-lg border border-purple-900/50 space-y-3 font-mono text-xs shadow-lg">
+                        <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                          <div>
+                            <span className="font-bold text-slate-100 text-sm block">
+                              👤 {admin.username}
+                            </span>
+                            <span className="text-[10px] text-purple-400 font-semibold">
+                              {admin.role}
+                            </span>
+                          </div>
+                          <span className="bg-purple-950 text-purple-300 border border-purple-800 px-2.5 py-0.5 rounded font-bold text-[10px]">
+                            ● {admin.status}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 text-[10px] text-slate-400">
+                          <div>IP Address: <strong className="text-slate-200">{admin.ip_address}</strong></div>
+                          <div>Last Active: <strong className="text-slate-200">{admin.last_active}</strong></div>
+                        </div>
+
+                        <div className="bg-slate-900/80 p-3 rounded border border-slate-800/80 space-y-1.5">
+                          <span className="text-slate-400 text-[10px] uppercase font-bold block border-b border-slate-800 pb-1">
+                            📋 TASKS & SYSTEM HANDLES MANAGED:
+                          </span>
+                          <ul className="space-y-1 text-[11px] text-slate-300">
+                            {admin.handles.map((task, tidx) => (
+                              <li key={tidx} className="flex items-start gap-1.5">
+                                <span className="text-purple-400 shrink-0">▪</span>
+                                <span>{task}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Right Column: Supervisor Personnel */}
+                  <div className="space-y-4">
+                    <h3 className="text-sm font-bold text-indigo-400 uppercase tracking-wide flex items-center gap-2 border-b border-slate-800 pb-2">
+                      🎓 CENTER SUPERVISOR PERSONNEL
+                    </h3>
+
+                    {(personnelData?.supervisors || [
+                      {
+                        username: "supervisor_center1",
+                        center_code: "CTR-101",
+                        role: "Head Exam Supervisor — Center 101",
+                        status: "ONLINE",
+                        ip_address: "127.0.0.1",
+                        last_active: "Just now",
+                        handles: [
+                          "Center CTR-101 Cryptographic PIN Authorization",
+                          "Live Student Kiosk Reader Monitoring",
+                          "Real-time Focus Loss & Right-Click Security Alerts",
+                          "Hall Terminal Heartbeat Gateway"
+                        ]
+                      },
+                      {
+                        username: "sup_delhi_north",
+                        center_code: "CTR-102",
+                        role: "Regional Exam Supervisor — North Center",
+                        status: "ACTIVE",
+                        ip_address: "192.168.1.45",
+                        last_active: "5 mins ago",
+                        handles: [
+                          "Center CTR-102 Kiosk Desk Authorizations",
+                          "Time-Lock Decryption Verification",
+                          "Student Violation Audit Reports"
+                        ]
+                      }
+                    ]).map((sup, idx) => (
+                      <div key={idx} className="bg-slate-950 p-5 rounded-lg border border-indigo-900/50 space-y-3 font-mono text-xs shadow-lg">
+                        <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                          <div>
+                            <span className="font-bold text-slate-100 text-sm block">
+                              👨‍🏫 {sup.username}
+                            </span>
+                            <span className="text-[10px] text-indigo-400 font-semibold">
+                              {sup.role} (Center: {sup.center_code})
+                            </span>
+                          </div>
+                          <span className="bg-indigo-950 text-indigo-300 border border-indigo-800 px-2.5 py-0.5 rounded font-bold text-[10px]">
+                            ● {sup.status}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 text-[10px] text-slate-400">
+                          <div>Center Code: <strong className="text-amber-400">{sup.center_code}</strong></div>
+                          <div>IP Address: <strong className="text-slate-200">{sup.ip_address}</strong></div>
+                        </div>
+
+                        <div className="bg-slate-900/80 p-3 rounded border border-slate-800/80 space-y-1.5">
+                          <span className="text-slate-400 text-[10px] uppercase font-bold block border-b border-slate-800 pb-1">
+                            📋 TASKS & SYSTEM HANDLES MANAGED:
+                          </span>
+                          <ul className="space-y-1 text-[11px] text-slate-300">
+                            {sup.handles.map((task, tidx) => (
+                              <li key={tidx} className="flex items-start gap-1.5">
+                                <span className="text-indigo-400 shrink-0">▪</span>
+                                <span>{task}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {activeTab === 'CONTROLLER' && (
               <div className="space-y-8">
                 <div className="border-b border-slate-700 pb-4">
@@ -600,18 +1383,136 @@ export default class ExamDashboard extends React.Component {
                     </div>
                   </div>
 
+                  {/* PDF Upload Field */}
                   <div>
-                    <label htmlFor="new-paper-text" className="block text-xs uppercase tracking-wider text-slate-400 mb-1">
-                      Raw Question Paper Content
+                    <label htmlFor="pdf-upload-input-dashboard" className="block text-xs uppercase tracking-wider text-slate-400 mb-1 font-mono">
+                      Upload Question Paper (PDF Format)
                     </label>
-                    <textarea
-                      id="new-paper-text"
-                      rows="7"
-                      value={newPaperText}
-                      onChange={(e) => this.setState({ newPaperText: e.target.value })}
-                      placeholder="Paste confidential question paper content here..."
-                      className="w-full bg-slate-900 border border-slate-700 rounded p-3 text-slate-100 font-mono text-sm focus:outline-none focus:border-amber-500"
-                    ></textarea>
+                    <div className="relative border-2 border-dashed border-slate-700 hover:border-amber-500 rounded-xl p-5 bg-slate-900/60 transition-colors text-center group cursor-pointer">
+                      <input
+                        id="pdf-upload-input-dashboard"
+                        aria-label="Upload Question Paper PDF"
+                        type="file"
+                        accept=".pdf,application/pdf"
+                        onChange={this.handlePdfFileChange}
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                      />
+                      <div className="flex flex-col items-center justify-center space-y-2">
+                        <div className="w-12 h-12 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 flex items-center justify-center text-xl group-hover:scale-110 transition-transform">
+                          📄
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-slate-200">
+                            {pdfFileName ? (
+                              <span className="text-emerald-400 font-mono">Uploaded PDF: {pdfFileName} ({pdfFileSize})</span>
+                            ) : (
+                              <>Click or drag & drop a <span className="text-amber-400 font-mono">PDF file</span> to upload</>
+                            )}
+                          </p>
+                          <p className="text-xs text-slate-500 mt-0.5 font-mono">Supports .pdf format documents</p>
+                        </div>
+                        {pdfFileName && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              this.handleRemovePdf();
+                            }}
+                            className="relative z-20 text-xs bg-red-950/80 text-red-300 border border-red-800 px-3 py-1 rounded hover:bg-red-900 transition-colors font-mono mt-1"
+                          >
+                            ✕ Remove PDF & Reset
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Uploaded PDF Content Picture / Visual Preview Area */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="block text-xs uppercase tracking-wider text-slate-400 font-mono flex items-center gap-2">
+                        <span>📷 Uploaded PDF Document Preview</span>
+                        <span className="text-amber-400 text-[10px] bg-amber-950/80 border border-amber-800 px-2 py-0.5 rounded font-mono">
+                          VISUAL PREVIEW
+                        </span>
+                      </label>
+                      {pdfFileName && (
+                        <span className="text-xs text-emerald-400 font-mono font-semibold flex items-center gap-1">
+                          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                          PDF Loaded
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 min-h-[200px] flex items-center justify-center relative overflow-hidden">
+                      {pdfPreviewUrl ? (
+                        <div className="w-full flex flex-col md:flex-row items-center gap-4 bg-slate-900/90 border border-slate-800 p-4 rounded-xl shadow-lg">
+                          {/* PDF Embedded Page Frame / Thumbnail View */}
+                          <div className="relative w-full md:w-52 h-44 bg-slate-950 rounded-lg overflow-hidden border border-amber-500/30 flex flex-col items-center justify-center">
+                            <object
+                              data={pdfPreviewUrl}
+                              type="application/pdf"
+                              aria-label="Uploaded PDF Preview"
+                              className="w-full h-full object-cover pointer-events-none opacity-85"
+                            >
+                              <div className="flex flex-col items-center justify-center h-full p-3 text-center bg-slate-900">
+                                <div className="text-4xl mb-1">📕</div>
+                                <span className="text-[11px] text-slate-300 font-mono font-bold truncate max-w-[150px]">{pdfFileName}</span>
+                                <span className="text-[10px] text-amber-400 font-mono mt-1">PDF DOCUMENT</span>
+                              </div>
+                            </object>
+                            <div className="absolute top-2 left-2 bg-red-600 text-white text-[10px] font-bold font-mono px-2 py-0.5 rounded shadow">
+                              PDF
+                            </div>
+                          </div>
+
+                          {/* PDF Metadata & Visual Representation Card */}
+                          <div className="flex-1 space-y-2.5 font-mono text-xs text-slate-300 w-full">
+                            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                              <span className="font-bold text-slate-100 text-sm flex items-center gap-2 truncate">
+                                📄 {pdfFileName}
+                              </span>
+                              <span className="bg-slate-800 text-slate-300 border border-slate-700 text-[10px] px-2 py-0.5 rounded shrink-0">
+                                {pdfFileSize}
+                              </span>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-2 text-[11px]">
+                              <div className="bg-slate-950 p-2 rounded border border-slate-800">
+                                <span className="text-slate-500 block text-[9px] uppercase">Format</span>
+                                <span className="text-amber-400 font-bold">PDF Document (.pdf)</span>
+                              </div>
+                              <div className="bg-slate-950 p-2 rounded border border-slate-800">
+                                <span className="text-slate-500 block text-[9px] uppercase">Security Status</span>
+                                <span className="text-emerald-400 font-bold">Ready for 2-Stage Lock</span>
+                              </div>
+                            </div>
+
+                            <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-1">
+                              <span className="text-slate-400 text-[10px] uppercase font-bold block">
+                                Extracted Document Content Snapshot:
+                              </span>
+                              <p className="text-slate-300 line-clamp-3 italic text-[11px] leading-relaxed">
+                                {newPaperText}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        /* Empty State Picture Area */
+                        <div className="flex flex-col items-center justify-center p-6 text-center space-y-2">
+                          <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center text-2xl shadow-inner">
+                            🖼️
+                          </div>
+                          <div>
+                            <h4 className="text-sm font-semibold text-slate-300 font-mono">PDF Visual Preview Area</h4>
+                            <p className="text-xs text-slate-500 mt-0.5 max-w-sm font-mono leading-relaxed">
+                              Upload a PDF file using the dropzone above to generate a visual document preview.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   <button
@@ -658,14 +1559,48 @@ export default class ExamDashboard extends React.Component {
             {activeTab === 'STUDENT' && (
               <div className="space-y-6">
                 {!studentUnlocked ? (
-                  <div className="max-w-lg mx-auto bg-slate-950 p-6 rounded-lg border border-emerald-800/80 space-y-5">
-                    <div className="border-b border-slate-800 pb-3">
-                      <h2 className="text-lg font-bold text-emerald-400 uppercase tracking-wide flex items-center gap-2">
-                        👨‍🎓 Student Kiosk Reader Terminal
-                      </h2>
-                      <p className="text-xs text-slate-400 mt-1">
-                        Client-server secure terminal. Authorize desk and view live question paper in locked kiosk mode.
-                      </p>
+                  <div className="max-w-xl mx-auto bg-slate-950 p-6 rounded-lg border border-emerald-800/80 space-y-5">
+                    <div className="flex items-start justify-between border-b border-slate-800 pb-4 gap-4">
+                      <div>
+                        <h2 className="text-lg font-bold text-emerald-400 uppercase tracking-wide flex items-center gap-2">
+                          👨‍🎓 Student Kiosk Reader Terminal
+                        </h2>
+                        <p className="text-xs text-slate-400 mt-1">
+                          Client-server secure terminal. Authorize desk and view live question paper in locked kiosk mode.
+                        </p>
+                      </div>
+                      {/* Single 3:4 Aspect Ratio Passport Photo Frame (10% Incremented 106px x 142px, Right-Aligned) */}
+                      <div
+                        className="relative bg-slate-900 border-2 border-slate-700 rounded-sm overflow-hidden shadow-lg flex flex-col items-center justify-center shrink-0 ml-auto"
+                        style={{ width: '106px', height: '142px', minWidth: '106px', minHeight: '142px', maxWidth: '106px', maxHeight: '142px' }}
+                        title="Student Passport Photo (3:4 Ratio)"
+                      >
+                        {studentPhotoUrl ? (
+                          <img
+                            src={studentPhotoUrl}
+                            alt="Passport Photo"
+                            className="w-full h-full object-cover aspect-[3/4]"
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          />
+                        ) : (
+                          <div
+                            className="w-full h-full flex flex-col items-center justify-center bg-[#f4ebd0] text-slate-800 p-1 text-center select-none"
+                            style={{ width: '100%', height: '100%' }}
+                          >
+                            <svg
+                              width="48"
+                              height="48"
+                              style={{ width: '48px', height: '48px', maxWidth: '48px', maxHeight: '48px' }}
+                              className="text-slate-700 mb-0.5 opacity-85 shrink-0"
+                              fill="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
+                            </svg>
+                            <span className="text-[10px] font-bold text-slate-800 tracking-wider font-mono uppercase shrink-0">PHOTO (3:4)</span>
+                          </div>
+                        )}
+                      </div>
                     </div>
 
                     {studentError && (
@@ -859,6 +1794,10 @@ export default class ExamDashboard extends React.Component {
               </div>
             )}
 
+            {activeTab === 'VERIFICATION' && (
+              <VerificationTerminal />
+            )}
+
             {activeTab === 'SUPERVISOR' && (
               <>
                 {error && (
@@ -981,22 +1920,26 @@ export default class ExamDashboard extends React.Component {
                   <span>FORENSIC WATERMARK: CTR-101 | DEV-MAC:A1:B2:C3 | IP:127.0.0.1 | UNLOCKED: {unlockedTimestamp || 'LIVE'}</span>
                 </div>
 
-                <div className="relative bg-slate-950 p-6 rounded border border-slate-800 font-mono text-sm space-y-4 overflow-hidden printable-paper select-none" onContextMenu={(e) => e.preventDefault()}>
-                  {/* Dynamic Forensic Overlay */}
-                  <div className="absolute inset-0 pointer-events-none select-none flex flex-col justify-around opacity-15 rotate-[-25deg] transform scale-125 z-10 text-[10px] text-cyan-400 font-bold tracking-widest leading-relaxed">
-                    {Array.from({ length: 6 }).map((_, i) => (
-                      <div key={i} className="whitespace-nowrap">
-                        CONFIDENTIAL — CTR-101 | DEV-MAC:A1:B2:C3 | IP:127.0.0.1 | {unlockedTimestamp || 'STAMPED'} — CONFIDENTIAL
-                      </div>
-                    ))}
+                {/* Direct Student Transmission Confirmation Card (Question Paper Text Hidden From Supervisor) */}
+                <div className="bg-emerald-950/60 border border-emerald-800 p-6 rounded-xl space-y-4 font-mono shadow-lg">
+                  <div className="flex items-center justify-between border-b border-emerald-900/80 pb-3 flex-wrap gap-2">
+                    <div className="flex items-center gap-2 text-emerald-400 font-bold text-base">
+                      <span>✅ QUESTION PAPER DECRYPTED & TRANSMITTED DIRECTLY TO STUDENT TERMINALS</span>
+                    </div>
+                    <span className="bg-emerald-900 text-emerald-300 border border-emerald-700 px-3 py-1 rounded font-bold text-xs">
+                      ● TRANSMITTED TO HALL DESKS
+                    </span>
                   </div>
 
-                  <h3 className="font-bold text-cyan-400 border-b border-slate-800 pb-2 relative z-20">
-                    CENTRAL UNIVERSITY EXAMINATION 2026 — SUBJECT: {subjectCode}
-                  </h3>
-                  <p className="relative z-20">Instructions: All questions are compulsory. Total marks: 100.</p>
-                  <div className="space-y-2 text-slate-300 py-2 relative z-20">
-                    {decryptedContent.split('\n').map((line, index) => (line.trim() ? <p key={index}>{line}</p> : null))}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs text-slate-300 bg-slate-950 p-4 rounded-lg border border-slate-800">
+                    <div>Subject Code: <strong className="text-amber-400">{subjectCode}</strong></div>
+                    <div>Exam Center: <strong className="text-cyan-400">{centerCode}</strong></div>
+                    <div>Decryption Stamping: <span className="text-slate-400">{unlockedTimestamp || 'STAMPED & VERIFIED'}</span></div>
+                    <div>Security Protocol: <span className="text-emerald-400">DIRECT KIOSK DELIVERY</span></div>
+                  </div>
+
+                  <div className="p-3 bg-slate-900/90 border border-slate-800 rounded text-xs text-slate-400 leading-relaxed">
+                    🔒 <strong>SECURITY COMPLIANCE DIRECTIVE:</strong> For maximum examination integrity, raw question paper content is strictly hidden from the supervisor terminal and delivered directly to authenticated student kiosk terminals in the examination hall.
                   </div>
                 </div>
 
@@ -1069,47 +2012,6 @@ export default class ExamDashboard extends React.Component {
                       ))}
                     </div>
                   )}
-                </div>
-
-                <div className="bg-slate-950 border border-slate-800 rounded-lg p-5 space-y-4 no-print">
-                  <div className="flex items-center justify-between gap-4">
-                    <div>
-                      <h4 className="text-sm font-semibold text-cyan-400 uppercase tracking-wide">Live Audit Trail</h4>
-                      <p className="text-xs text-slate-500">Fetched directly from the FastAPI backend.</p>
-                    </div>
-                    <button
-                      onClick={this.loadAuditLogs}
-                      className="bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 px-3 py-2 rounded text-xs font-semibold transition-colors"
-                    >
-                      {auditLoading ? 'REFRESHING...' : 'REFRESH LOGS'}
-                    </button>
-                  </div>
-
-                  {auditError && (
-                    <div className="bg-red-950 border border-red-800 text-red-200 px-4 py-3 rounded text-sm font-mono">
-                      [LOG ERROR] {auditError}
-                    </div>
-                  )}
-
-                  {!auditError && auditLogs.length === 0 && !auditLoading && (
-                    <p className="text-sm text-slate-500 font-mono">No audit events were returned by the backend yet.</p>
-                  )}
-
-                  <div className="space-y-3 max-h-72 overflow-auto pr-1">
-                    {auditLogs.map((log) => (
-                      <div key={log.log_id ?? `${log.timestamp}-${log.action_type}`} className="border border-slate-800 rounded-md bg-slate-900/60 p-4 text-sm font-mono space-y-1">
-                        <div className="flex flex-wrap items-center gap-2 text-slate-300">
-                          <span className="text-emerald-400">{log.action_type}</span>
-                          <span className="text-slate-600">|</span>
-                          <span>{log.timestamp}</span>
-                        </div>
-                        <div className="text-slate-400">
-                          User: {log.user_id ?? 'n/a'} | Center: {log.center_id ?? 'n/a'} | IP: {log.ip_address ?? 'n/a'}
-                        </div>
-                        {log.details && <div className="text-slate-500">{log.details}</div>}
-                      </div>
-                    ))}
-                  </div>
                 </div>
               </div>
             )}

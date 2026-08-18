@@ -70,7 +70,7 @@ describe('SupervisorTerminal Component', () => {
       await Promise.resolve();
     });
 
-    expect(screen.getByText(/CONFIDENTIAL EXAM PAPER:/i)).toBeInTheDocument();
+    expect(screen.getByText(/QUESTION PAPER DECRYPTED & TRANSMITTED DIRECTLY TO STUDENT TERMINALS/i)).toBeInTheDocument();
     expect(screen.getByText(/FORENSIC WATERMARK:/i)).toBeInTheDocument();
   });
 });
