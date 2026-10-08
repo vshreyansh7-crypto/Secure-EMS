@@ -37,13 +37,13 @@ class CloudDBCursor:
         if getattr(self, 'last_suppressed', False):
             return None
         row = self.cursor.fetchone()
-        return dict(row) if row else None
+        return row
 
     def fetchall(self):
         if getattr(self, 'last_suppressed', False):
             return []
         rows = self.cursor.fetchall()
-        return [dict(row) for row in rows] if rows else []
+        return rows if rows else []
         
     @property
     def lastrowid(self):

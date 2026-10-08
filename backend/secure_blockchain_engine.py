@@ -109,7 +109,8 @@ class SecureBlockchainEngine:
 
 
     def _get_connection(self):
-        return sqlite3.connect(self.db_path)
+        from cloud_db_driver import get_db_connection
+        return get_db_connection()
 
     def _init_ledger_db(self):
         conn = self._get_connection()
