@@ -931,7 +931,7 @@ def fetch_student_paper(payload: StudentPaperRequest, request: Request):
     ).fetchone()
     s_conn.close()
 
-    if s_row and s_row["status"] not in ("SUPERVISOR_UNLOCKED", "PUBLISHED_TO_STUDENTS", "COMPLETED"):
+    if s_row and s_row["status"] not in ("PUBLISHED_TO_STUDENTS", "COMPLETED"):
         log_audit_event(
             center_id=center_id,
             action_type="STUDENT_WAITING_FOR_SUPERVISOR",
