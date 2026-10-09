@@ -9,6 +9,6 @@
     }
   },
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "https://secure-ems.onrender.com/api/$1" }
+    { "source": "/api/(.*)", "destination": "https://secure-ems-backend.onrender.com/api/$1" }
   ]
 }
