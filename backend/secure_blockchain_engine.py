@@ -91,7 +91,7 @@ class SecureBlockchainEngine:
                 self.account = self.w3.eth.account.from_key(PRIVATE_KEY)
                 self.contract = self.w3.eth.contract(address=CONTRACT_ADDRESS, abi=CONTRACT_ABI)
                 # Enabled for Production Polygon Amoy Deployment
-                self.use_real_blockchain = False # Bypassed for testing to save gas
+                self.use_real_blockchain = True
                 print(f"Web3 Connected to Polygon Amoy Testnet. Address: {self.account.address}")
             else:
                 print("Web3 NOT fully configured. Falling back to LOCAL MOCK mode.")
@@ -359,20 +359,23 @@ class SecureBlockchainEngine:
             })
         return records
 
-    def sync_from_global_chain(self, from_block: int = 0) -> int:
+    def sync_from_global_chain(self, from_block: Optional[int] = None) -> int:
         """
         Recovers the local ledger by fetching all anchoring events from the global smart contract.
-        Useful when local SQLite database is deleted, corrupted, or when syncing a new node.
+        Useful when local database is deleted or when syncing a new node.
         """
         if not self.use_real_blockchain:
             print("Web3 not configured. Cannot sync from global chain.")
             return 0
             
-        print(f"Syncing from global blockchain starting at block {from_block}...")
-        
         try:
+            current_block = self.w3.eth.block_number
+            if from_block is None:
+                from_block = max(0, current_block - 5000)
+            print(f"Syncing from global blockchain starting at block {from_block}...")
+            
             # Get all LogAnchored events
-            event_filter = self.contract.events.LogAnchored.create_filter(fromBlock=from_block, toBlock='latest')
+            event_filter = self.contract.events.LogAnchored.create_filter(from_block=from_block, to_block='latest')
             events = event_filter.get_all_entries()
         except Exception as e:
             print(f"Failed to fetch events from global chain: {e}")

@@ -366,10 +366,9 @@ def log_audit_event(user_id=None, center_id=None, action_type="AUDIT_EVENT", det
         if anchor_to_blockchain:
             # Anchor on immutable blockchain ledger
             log_id_temp = f"LOG_{timestamp_str}_{action_type}"
-            # bc_receipt = blockchain_engine.anchor_record(record_id=log_id_temp, payload_bytes_or_hash=current_hash, actor=f"USER_{user_id}")
-            bc_receipt = {"tx_hash": "TEST_MODE_BYPASS_NO_FEE", "payload_hash": "TEST_HASH"}
+            bc_receipt = blockchain_engine.anchor_record(record_id=log_id_temp, payload_bytes_or_hash=current_hash, actor=f"USER_{user_id}")
             tx_hash = bc_receipt.get("tx_hash", "")
-            on_chain_status = "CONFIRMED"
+            on_chain_status = bc_receipt.get("status", "CONFIRMED")
 
         cursor.execute(
             """
@@ -456,9 +455,7 @@ def upload_question_paper(payload: PaperUploadRequest, request: Request):
 
     # 4. Anchor payload on Blockchain Ledger
     record_id = f"PAPER_{clean_subject}"
-    # bc_receipt = blockchain_engine.anchor_record(record_id=record_id, payload_bytes_or_hash=stage2_bytes, actor=payload.uploader_username)
-    # Bypass blockchain to save POL gas fees during testing:
-    bc_receipt = {"tx_hash": "TEST_MODE_BYPASS_NO_FEE", "payload_hash": "TEST_HASH", "explorer_url": ""}
+    bc_receipt = blockchain_engine.anchor_record(record_id=record_id, payload_bytes_or_hash=stage2_bytes, actor=payload.uploader_username)
     tx_hash = bc_receipt.get("tx_hash", "")
     paper_hash = bc_receipt.get("payload_hash", "")
 
@@ -549,9 +546,9 @@ def get_blockchain_ledger():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # Fetch directly from Supabase
-        papers = cursor.execute("SELECT paper_id, subject_code, created_at, blockchain_tx_hash, paper_hash, on_chain_status FROM question_papers WHERE blockchain_tx_hash IS NOT NULL AND blockchain_tx_hash != '' ORDER BY paper_id DESC LIMIT 25").fetchall()
-        logs = cursor.execute("SELECT log_id, action_type, timestamp, blockchain_tx_hash, current_hash, on_chain_status FROM audit_logs WHERE blockchain_tx_hash IS NOT NULL AND blockchain_tx_hash != '' ORDER BY log_id DESC LIMIT 25").fetchall()
+        # Fetch directly from Supabase (only genuine on-chain 0x transaction hashes)
+        papers = cursor.execute("SELECT paper_id, subject_code, created_at, blockchain_tx_hash, paper_hash, on_chain_status FROM question_papers WHERE blockchain_tx_hash LIKE '0x%' ORDER BY paper_id DESC LIMIT 25").fetchall()
+        logs = cursor.execute("SELECT log_id, action_type, timestamp, blockchain_tx_hash, current_hash, on_chain_status FROM audit_logs WHERE blockchain_tx_hash LIKE '0x%' ORDER BY log_id DESC LIMIT 25").fetchall()
         
         conn.close()
 
