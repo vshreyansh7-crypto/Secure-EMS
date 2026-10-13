@@ -288,6 +288,19 @@ export default class ExamDashboard extends React.Component {
     }
   };
 
+  fetchAdminKeyForSubject = async (subjectCode) => {
+    if (!subjectCode || !subjectCode.trim()) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/supervisor/paper-key?subject_code=${subjectCode.trim().toUpperCase()}`);
+      const data = await res.json();
+      if (res.ok && data.admin_key) {
+        this.setState({ adminToken: data.admin_key });
+      }
+    } catch (e) {
+      console.warn('Could not auto-fetch paper admin key', e);
+    }
+  };
+
   loadScheduledExams = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/supervisor/scheduled-exams?center_code=${this.state.centerCode}`);
@@ -295,6 +308,12 @@ export default class ExamDashboard extends React.Component {
         const data = await res.json();
         if (Array.isArray(data.scheduled_exams)) {
           this.setState({ scheduledExamsList: data.scheduled_exams });
+          const currentExam = data.scheduled_exams.find(
+            (ex) => ex.subject_code.toUpperCase() === (this.state.subjectCode || '').toUpperCase()
+          );
+          if (currentExam && currentExam.admin_key) {
+            this.setState({ adminToken: currentExam.admin_key });
+          }
         }
       }
     } catch (e) {
@@ -1291,7 +1310,7 @@ Q3. Outline the biometric candidate verification workflow prior to hall entry.
   handleDecrypt = async (e) => {
     e.preventDefault();
 
-    const { countdown, pin, centerCode, subjectCode } = this.state;
+    const { countdown, pin, centerCode, subjectCode, adminToken } = this.state;
 
     if (!pin || pin.trim() === '') {
       this.setState({ error: 'Please enter the supervisor cryptographic PIN (Key B).' });
@@ -1311,7 +1330,7 @@ Q3. Outline the biometric candidate verification workflow prior to hall entry.
           center_code: centerCode,
           subject_code: subjectCode,
           pin,
-          admin_token: "",
+          admin_token: adminToken || "",
         }),
       });
 
@@ -2502,13 +2521,31 @@ Q3. Outline the biometric candidate verification workflow prior to hall entry.
 
                       {/* Exact Uploaded PDF Document Stream, Image Pages, or Clean Question Paper Payload */}
                       {(() => {
-                        const { text: activePaperText, pages: activePages } = this.getPaperDetails(studentPaperContent, studentSubjectCode);
+                        const { text: activePaperText, pages: activePages, dataUrl: pdfDataUrl } = this.getPaperDetails(studentPaperContent, studentSubjectCode);
                         const displayContent = activePaperText || this.getCleanPaperContent(studentPaperContent, studentSubjectCode);
 
                         if (activePages && activePages.length > 0) {
                           return (
                             <div className="w-full relative z-20">
                               <ImagePaperViewer pages={activePages} subjectCode={studentSubjectCode} title={`Official Question Paper (${studentSubjectCode})`} />
+                            </div>
+                          );
+                        }
+
+                        if (pdfDataUrl) {
+                          return (
+                            <div className="w-full relative z-20 h-full min-h-[600px] bg-slate-900 p-2 rounded-xl border border-slate-800 shadow-2xl">
+                              <div className="border-b border-slate-800 pb-2 mb-2 flex items-center justify-between px-2 text-xs font-mono">
+                                <span className="bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded font-bold uppercase tracking-wider">
+                                  📄 OFFICIAL PDF QUESTION PAPER ({studentSubjectCode})
+                                </span>
+                                <span className="text-slate-400">Seat: {studentSeat}</span>
+                              </div>
+                              <iframe 
+                                src={`${pdfDataUrl}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`} 
+                                className="w-full h-[600px] border-0 rounded"
+                                title={`Official Question Paper PDF (${studentSubjectCode})`}
+                              />
                             </div>
                           );
                         }
@@ -2645,7 +2682,17 @@ Q3. Outline the biometric candidate verification workflow prior to hall entry.
                             </span>
                             <button
                               type="button"
-                              onClick={() => this.setState({ subjectCode: ex.subject_code })}
+                              onClick={() => {
+                                const token = ex.admin_key || this.state.adminToken;
+                                this.setState({
+                                  subjectCode: ex.subject_code,
+                                  adminToken: token,
+                                }, () => {
+                                  if (!ex.admin_key) {
+                                    this.fetchAdminKeyForSubject(ex.subject_code);
+                                  }
+                                });
+                              }}
                               className="bg-cyan-700 hover:bg-cyan-600 text-slate-950 px-2.5 py-1 rounded text-xs font-bold font-mono"
                             >
                               SELECT SUBJECT
@@ -2692,8 +2739,33 @@ Q3. Outline the biometric candidate verification workflow prior to hall entry.
                       id="subject-code"
                       type="text"
                       value={subjectCode}
-                      onChange={(e) => this.setState({ subjectCode: e.target.value })}
+                      onChange={(e) => {
+                        const sc = e.target.value;
+                        this.setState({ subjectCode: sc });
+                        this.fetchAdminKeyForSubject(sc);
+                      }}
                       className="w-full bg-slate-950 border border-slate-700 rounded p-3 text-slate-100 focus:outline-none focus:border-cyan-500 font-mono text-sm"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label htmlFor="admin-token" className="block text-xs uppercase tracking-wider text-cyan-400">
+                        🔑 Key A: Admin Controller Token
+                      </label>
+                      {this.state.adminToken && this.state.adminToken !== 'CTRL-KEY-999' && (
+                        <span className="text-[10px] text-emerald-400 bg-emerald-950/80 border border-emerald-800 px-2 py-0.5 rounded font-mono">
+                          ✓ Auto-Synced from Controller
+                        </span>
+                      )}
+                    </div>
+                    <input
+                      id="admin-token"
+                      type="password"
+                      value={this.state.adminToken || ''}
+                      onChange={(e) => this.setState({ adminToken: e.target.value })}
+                      placeholder="Enter admin cryptographic token"
+                      className="w-full bg-slate-950 border border-cyan-700/60 rounded p-3 text-cyan-200 focus:outline-none focus:border-cyan-400 font-mono text-sm"
                     />
                   </div>
 

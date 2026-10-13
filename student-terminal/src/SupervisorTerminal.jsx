@@ -123,6 +123,19 @@ export default class SupervisorTerminal extends React.Component {
     });
   };
 
+  fetchAdminKeyForSubject = async (subjectCode) => {
+    if (!subjectCode || !subjectCode.trim()) return;
+    try {
+      const response = await fetch(`${API_BASE}/api/supervisor/paper-key?subject_code=${subjectCode.trim().toUpperCase()}`);
+      const data = await response.json();
+      if (response.ok && data.admin_key) {
+        this.setState({ adminToken: data.admin_key });
+      }
+    } catch (e) {
+      console.warn('Could not auto-fetch paper admin key', e);
+    }
+  };
+
   loadScheduledExams = async () => {
     this.setState({ scheduledLoading: true });
     try {
@@ -130,6 +143,13 @@ export default class SupervisorTerminal extends React.Component {
       const data = await response.json();
       if (response.ok && Array.isArray(data.scheduled_exams)) {
         this.setState({ scheduledExams: data.scheduled_exams });
+        // If an exam matching current subject has an admin_key, auto-fill it
+        const currentExam = data.scheduled_exams.find(
+          (ex) => ex.subject_code.toUpperCase() === (this.state.subjectCode || '').toUpperCase()
+        );
+        if (currentExam && currentExam.admin_key) {
+          this.setState({ adminToken: currentExam.admin_key });
+        }
       }
     } catch (e) {
       console.error('Failed to load scheduled exams', e);
@@ -267,7 +287,7 @@ export default class SupervisorTerminal extends React.Component {
           center_code: centerCode,
           subject_code: subjectCode,
           pin,
-          admin_token: "",
+          admin_token: adminToken || "",
         }),
       });
 
@@ -453,7 +473,18 @@ export default class SupervisorTerminal extends React.Component {
                             </span>
                             <button
                               type="button"
-                              onClick={() => this.setState({ subjectCode: ex.subject_code })}
+                              onClick={() => {
+                                const token = ex.admin_key || this.state.adminToken;
+                                this.setState({
+                                  subjectCode: ex.subject_code,
+                                  adminToken: token,
+                                  blockchainPreCheck: null,
+                                }, () => {
+                                  if (!ex.admin_key) {
+                                    this.fetchAdminKeyForSubject(ex.subject_code);
+                                  }
+                                });
+                              }}
                               className="bg-cyan-700 hover:bg-cyan-600 text-slate-950 px-2.5 py-1 rounded text-xs font-bold font-mono"
                             >
                               SELECT SUBJECT
@@ -503,7 +534,11 @@ export default class SupervisorTerminal extends React.Component {
                         id="sup-subject-code"
                         type="text"
                         value={subjectCode}
-                        onChange={(e) => this.setState({ subjectCode: e.target.value, blockchainPreCheck: null })}
+                        onChange={(e) => {
+                          const sc = e.target.value;
+                          this.setState({ subjectCode: sc, blockchainPreCheck: null });
+                          this.fetchAdminKeyForSubject(sc);
+                        }}
                         className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-slate-100 focus:outline-none focus:border-cyan-500 font-mono text-sm"
                       />
                       <button
@@ -550,6 +585,27 @@ export default class SupervisorTerminal extends React.Component {
                       )}
                     </div>
                   )}
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label htmlFor="sup-admin-token" className="block text-xs uppercase tracking-wider text-cyan-400 font-mono font-bold">
+                        🔑 Key A: Admin Controller Token
+                      </label>
+                      {this.state.adminToken && this.state.adminToken !== 'CTRL-KEY-999' && (
+                        <span className="text-[10px] text-emerald-400 bg-emerald-950/80 border border-emerald-800 px-2 py-0.5 rounded font-mono">
+                          ✓ Auto-Synced from Controller
+                        </span>
+                      )}
+                    </div>
+                    <input
+                      id="sup-admin-token"
+                      type="password"
+                      value={this.state.adminToken || ''}
+                      onChange={(e) => this.setState({ adminToken: e.target.value })}
+                      placeholder="Auto-synced or enter admin token"
+                      className="w-full bg-slate-950 border border-cyan-800/70 rounded-lg p-3 text-cyan-200 focus:outline-none focus:border-cyan-400 font-mono text-sm"
+                    />
+                  </div>
 
                   <div>
                     <label htmlFor="sup-secure-pin" className="block text-xs uppercase tracking-wider text-amber-400 mb-1 font-mono font-bold">

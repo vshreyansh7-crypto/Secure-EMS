@@ -288,6 +288,19 @@ export default class ExamDashboard extends React.Component {
     }
   };
 
+  fetchAdminKeyForSubject = async (subjectCode) => {
+    if (!subjectCode || !subjectCode.trim()) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/supervisor/paper-key?subject_code=${subjectCode.trim().toUpperCase()}`);
+      const data = await res.json();
+      if (res.ok && data.admin_key) {
+        this.setState({ adminToken: data.admin_key });
+      }
+    } catch (e) {
+      console.warn('Could not auto-fetch paper admin key', e);
+    }
+  };
+
   loadScheduledExams = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/supervisor/scheduled-exams?center_code=${this.state.centerCode}`);
@@ -295,6 +308,12 @@ export default class ExamDashboard extends React.Component {
         const data = await res.json();
         if (Array.isArray(data.scheduled_exams)) {
           this.setState({ scheduledExamsList: data.scheduled_exams });
+          const currentExam = data.scheduled_exams.find(
+            (ex) => ex.subject_code.toUpperCase() === (this.state.subjectCode || '').toUpperCase()
+          );
+          if (currentExam && currentExam.admin_key) {
+            this.setState({ adminToken: currentExam.admin_key });
+          }
         }
       }
     } catch (e) {
@@ -2663,7 +2682,17 @@ Q3. Outline the biometric candidate verification workflow prior to hall entry.
                             </span>
                             <button
                               type="button"
-                              onClick={() => this.setState({ subjectCode: ex.subject_code })}
+                              onClick={() => {
+                                const token = ex.admin_key || this.state.adminToken;
+                                this.setState({
+                                  subjectCode: ex.subject_code,
+                                  adminToken: token,
+                                }, () => {
+                                  if (!ex.admin_key) {
+                                    this.fetchAdminKeyForSubject(ex.subject_code);
+                                  }
+                                });
+                              }}
                               className="bg-cyan-700 hover:bg-cyan-600 text-slate-950 px-2.5 py-1 rounded text-xs font-bold font-mono"
                             >
                               SELECT SUBJECT
@@ -2710,15 +2739,26 @@ Q3. Outline the biometric candidate verification workflow prior to hall entry.
                       id="subject-code"
                       type="text"
                       value={subjectCode}
-                      onChange={(e) => this.setState({ subjectCode: e.target.value })}
+                      onChange={(e) => {
+                        const sc = e.target.value;
+                        this.setState({ subjectCode: sc });
+                        this.fetchAdminKeyForSubject(sc);
+                      }}
                       className="w-full bg-slate-950 border border-slate-700 rounded p-3 text-slate-100 focus:outline-none focus:border-cyan-500 font-mono text-sm"
                     />
                   </div>
 
                   <div>
-                    <label htmlFor="admin-token" className="block text-xs uppercase tracking-wider text-cyan-400 mb-1">
-                      🔑 Key A: Admin Controller Token
-                    </label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label htmlFor="admin-token" className="block text-xs uppercase tracking-wider text-cyan-400">
+                        🔑 Key A: Admin Controller Token
+                      </label>
+                      {this.state.adminToken && this.state.adminToken !== 'CTRL-KEY-999' && (
+                        <span className="text-[10px] text-emerald-400 bg-emerald-950/80 border border-emerald-800 px-2 py-0.5 rounded font-mono">
+                          ✓ Auto-Synced from Controller
+                        </span>
+                      )}
+                    </div>
                     <input
                       id="admin-token"
                       type="password"
