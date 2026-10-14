@@ -1184,6 +1184,19 @@ def verify_student_entry(payload: StudentVerificationRequest, request: Request):
             detail=f"FACE MISMATCH: Student '{roll}' facial recognition failed. Confidence: {confidence}%. Entry DENIED."
         )
 
+    # Look up registered student name from student_faces if available
+    student_name = ""
+    try:
+        conn_face = get_db_connection()
+        c_face = conn_face.cursor()
+        c_face.execute("SELECT student_name FROM student_faces WHERE UPPER(roll_number) = ?", (roll,))
+        f_row = c_face.fetchone()
+        if f_row and f_row["student_name"]:
+            student_name = f_row["student_name"]
+        conn_face.close()
+    except Exception:
+        pass
+
     clearance_token = f"PASS-{roll}-{int(datetime.now().timestamp())}"
 
     try:
@@ -1192,9 +1205,10 @@ def verify_student_entry(payload: StudentVerificationRequest, request: Request):
         ensure_student_verifications_table(cursor)
         cursor.execute(
             """
-            INSERT INTO student_verifications (roll_number, seat_id, center_code, captured_image_base64, clearance_token, facial_match_confidence, status)
-            VALUES (?, ?, ?, ?, ?, ?, 'VERIFIED')
+            INSERT INTO student_verifications (roll_number, student_name, seat_id, center_code, captured_image_base64, clearance_token, facial_match_confidence, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'VERIFIED')
             ON CONFLICT(roll_number) DO UPDATE SET
+                student_name=excluded.student_name,
                 seat_id=excluded.seat_id,
                 center_code=excluded.center_code,
                 captured_image_base64=excluded.captured_image_base64,
@@ -1203,7 +1217,7 @@ def verify_student_entry(payload: StudentVerificationRequest, request: Request):
                 status='VERIFIED',
                 timestamp=CURRENT_TIMESTAMP
             """,
-            (roll, payload.seat_id, payload.center_code, payload.captured_image_base64, clearance_token, confidence)
+            (roll, student_name, payload.seat_id, payload.center_code, payload.captured_image_base64, clearance_token, confidence)
         )
         conn.commit()
         conn.close()
@@ -1212,7 +1226,7 @@ def verify_student_entry(payload: StudentVerificationRequest, request: Request):
 
     log_audit_event(
         action_type="STUDENT_PRE_EXAM_VERIFICATION",
-        details=f"Student Roll '{roll}' verified at hall entry. Face Match: {face_status}. Confidence: {confidence}%. Image: {has_image}.",
+        details=f"Student '{student_name or roll}' (Roll: {roll}) verified at hall entry. Face Match: {face_status}. Confidence: {confidence}%. Image: {has_image}.",
         ip_address=client_ip
     )
 
@@ -1220,6 +1234,7 @@ def verify_student_entry(payload: StudentVerificationRequest, request: Request):
         "status": "VERIFIED",
         "verified": True,
         "roll_number": roll,
+        "student_name": student_name,
         "seat_id": payload.seat_id,
         "center_code": payload.center_code,
         "captured_image_base64": payload.captured_image_base64,
@@ -1227,7 +1242,7 @@ def verify_student_entry(payload: StudentVerificationRequest, request: Request):
         "face_match_status": face_status,
         "enrollment_db_status": "MATCHED",
         "clearance_token": clearance_token,
-        "message": f"Student '{roll}' face-verified & cleared for examination hall entry. Match: {face_status} ({confidence}%).",
+        "message": f"Student '{student_name or roll}' face-verified & cleared for examination hall entry. Match: {face_status} ({confidence}%).",
         "timestamp": datetime.now().isoformat()
     }
 
