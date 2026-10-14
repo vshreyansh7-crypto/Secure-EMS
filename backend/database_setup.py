@@ -179,6 +179,18 @@ def initialize_database():
     """)
     ensure_scheduled_exams_columns(cursor)
 
+    # 8. Student Faces Table (Biometric 128-point Face Descriptor)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS student_faces (
+        face_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        roll_number TEXT UNIQUE NOT NULL,
+        student_name TEXT,
+        face_descriptor TEXT NOT NULL,
+        enrolled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        status TEXT DEFAULT 'ENROLLED'
+    );
+    """)
+
     # Insert default baseline roles if they don't exist
     default_roles = [
         ('ADMIN', 'System Administrator with full management privileges'),
