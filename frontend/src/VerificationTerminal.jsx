@@ -3,13 +3,14 @@ import * as faceapi from 'face-api.js';
 
 const API_BASE = import.meta.env.PROD ? '' : 'http://localhost:8000';
 const MODELS_URL = '/models';
-const FACE_MATCH_THRESHOLD = 0.55; // Euclidean distance < 0.55 = same person
+// Standard face-api threshold: < 0.52 = Same person, >= 0.52 = Different person
+const FACE_MATCH_THRESHOLD = 0.52;
 
 export default class VerificationTerminal extends React.Component {
   constructor(props) {
     super(props);
     this.state = {
-      rollNumber: '2026-CS-109',
+      rollNumber: '2026-CS-111',
       seatId: 'DESK-42',
       centerCode: 'CTR-101',
       capturedImage: null,
@@ -18,16 +19,16 @@ export default class VerificationTerminal extends React.Component {
       verifying: false,
       verificationResult: null,
       errorMessage: '',
-      // Face-api states
+      // Face-api AI states
       modelsLoaded: false,
       modelsLoading: true,
       modelError: '',
       liveDetectionStatus: '', // 'FACE_FOUND' | 'NO_FACE'
       faceDetected: false,
-      faceMatchStatus: '', // 'MATCHING' | 'MATCHED' | 'NO_MATCH' | 'NO_DESCRIPTOR'
+      faceMatchStatus: '', // 'MATCHED' | 'NO_MATCH' | 'NO_DESCRIPTOR' | 'MATCHING'
       faceMatchConfidence: null,
-      storedDescriptor: null,
-      // Registered student details from DB
+      liveDistance: null,
+      // Database enrolled student
       enrolledStudent: null,
       lookingUpStudent: false,
     };
@@ -35,6 +36,7 @@ export default class VerificationTerminal extends React.Component {
     this.canvasRef = React.createRef();
     this.mediaStream = null;
     this.detectionInterval = null;
+    this.lastLiveDescriptor = null;
   }
 
   componentDidMount() {
@@ -106,7 +108,9 @@ export default class VerificationTerminal extends React.Component {
       capturedImage: null,
       faceMatchStatus: '',
       faceMatchConfidence: null,
+      liveDistance: null,
     });
+    this.lastLiveDescriptor = null;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: 640 }, height: { ideal: 480 } },
@@ -136,16 +140,53 @@ export default class VerificationTerminal extends React.Component {
     this.setState({ isCameraActive: false, liveDetectionStatus: '', faceDetected: false });
   };
 
+  // Real-time continuous face detection & matching on live video feed
   startLiveFaceDetection = () => {
     this.detectionInterval = setInterval(async () => {
-      if (!this.videoElement || !this.state.modelsLoaded) return;
+      if (!this.videoElement || !this.state.modelsLoaded || !this.state.isCameraActive) return;
       try {
         const det = await faceapi
-          .detectSingleFace(this.videoElement, new faceapi.TinyFaceDetectorOptions())
-          .withFaceLandmarks();
-        this.setState({ faceDetected: !!det, liveDetectionStatus: det ? 'FACE_FOUND' : 'NO_FACE' });
-      } catch {}
-    }, 500);
+          .detectSingleFace(
+            this.videoElement,
+            new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 })
+          )
+          .withFaceLandmarks()
+          .withFaceDescriptor();
+
+        if (det) {
+          this.lastLiveDescriptor = det.descriptor;
+          const stored = this.state.enrolledStudent?.rawDescriptor;
+
+          let matchStatus = 'FACE_FOUND';
+          let matchConf = null;
+          let dist = null;
+
+          if (stored) {
+            dist = faceapi.euclideanDistance(det.descriptor, stored);
+            const isMatch = dist < FACE_MATCH_THRESHOLD;
+            // Normalized confidence score: dist=0 -> 100%, dist=0.4 -> ~75%, dist>=0.8 -> 0%
+            const conf = Math.max(0, Math.min(100, Math.round((1 - dist / 0.8) * 100 * 10) / 10));
+            matchStatus = isMatch ? 'MATCHED' : 'NO_MATCH';
+            matchConf = conf;
+          }
+
+          this.setState({
+            faceDetected: true,
+            liveDetectionStatus: 'FACE_FOUND',
+            faceMatchStatus: matchStatus,
+            faceMatchConfidence: matchConf,
+            liveDistance: dist !== null ? Math.round(dist * 1000) / 1000 : null,
+          });
+        } else {
+          this.setState({
+            faceDetected: false,
+            liveDetectionStatus: 'NO_FACE',
+          });
+        }
+      } catch (e) {
+        console.warn('Face detection loop:', e);
+      }
+    }, 450);
   };
 
   captureRuntimePhoto = async () => {
@@ -155,135 +196,144 @@ export default class VerificationTerminal extends React.Component {
       this.simulateCameraCapture();
       return;
     }
-    canvas.width = 300;
-    canvas.height = 400;
-    const ctx = canvas.getContext ? canvas.getContext('2d') : null;
-    if (ctx) ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    let dataUrl = '';
-    try {
-      dataUrl = canvas.toDataURL('image/jpeg', 0.9);
-    } catch (e) {}
-    this.setState({ capturedImage: dataUrl || '' });
-    this.stopCamera();
-  };
 
-  simulateCameraCapture = () => {
-    let dataUrl =
-      'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400"><rect width="300" height="400" fill="%230f172a"/><text x="20" y="40" fill="%2310b981" font-family="monospace" font-size="14">SIMULATED CAPTURE</text></svg>';
+    // 1. Extract live descriptor directly from video before stopping
     try {
-      const canvas = this.canvasRef.current || document.createElement('canvas');
+      const det = await faceapi
+        .detectSingleFace(
+          video,
+          new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 })
+        )
+        .withFaceLandmarks()
+        .withFaceDescriptor();
+
+      if (!det) {
+        this.setState({
+          errorMessage: '❌ No face clearly detected in frame. Please face the camera and try again.',
+        });
+        return;
+      }
+
+      this.lastLiveDescriptor = det.descriptor;
+
+      // 2. Compute match against enrolled student descriptor
+      let matchStatus = 'FACE_FOUND';
+      let matchConf = null;
+      let dist = null;
+      const stored = this.state.enrolledStudent?.rawDescriptor;
+
+      if (stored) {
+        dist = faceapi.euclideanDistance(det.descriptor, stored);
+        const isMatch = dist < FACE_MATCH_THRESHOLD;
+        const conf = Math.max(0, Math.min(100, Math.round((1 - dist / 0.8) * 100 * 10) / 10));
+        matchStatus = isMatch ? 'MATCHED' : 'NO_MATCH';
+        matchConf = conf;
+      }
+
+      // 3. Draw snapshot onto canvas
       canvas.width = 300;
       canvas.height = 400;
       const ctx = canvas.getContext ? canvas.getContext('2d') : null;
-      if (ctx) {
-        ctx.fillStyle = '#0f172a';
-        ctx.fillRect(0, 0, 300, 400);
-        ctx.fillStyle = '#10b981';
-        ctx.font = 'bold 12px monospace';
-        ctx.fillText('SIMULATED CAPTURE', 15, 30);
-        ctx.fillStyle = '#94a3b8';
-        ctx.font = '10px monospace';
-        ctx.fillText(`TIMESTAMP: ${new Date().toLocaleTimeString()}`, 15, 380);
-        dataUrl = canvas.toDataURL('image/jpeg', 0.9);
-      }
-    } catch {}
-    this.setState({ capturedImage: dataUrl, isCameraActive: false });
-  };
+      if (ctx) ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
 
-  fetchStoredDescriptor = async (rollNumber) => {
-    const roll = rollNumber.trim().toUpperCase();
-    const res = await fetch(`${API_BASE}/api/student-face-descriptor/${encodeURIComponent(roll)}`);
-    const data = await res.json();
-    if (!data.found || !data.face_descriptor) return null;
-    return new Float32Array(data.face_descriptor);
-  };
+      this.stopCamera();
 
-  runFaceMatch = async () => {
-    const { rollNumber, modelsLoaded, isCameraActive, capturedImage } = this.state;
-    if (!modelsLoaded) return { status: 'NO_DESCRIPTOR', confidence: 0 };
-    this.setState({ faceMatchStatus: 'MATCHING' });
-
-    // 1. Fetch stored descriptor from DB
-    let storedDescriptor;
-    try {
-      storedDescriptor = await this.fetchStoredDescriptor(rollNumber);
-    } catch {
-      return { status: 'NO_DESCRIPTOR', confidence: 0 };
-    }
-    if (!storedDescriptor) return { status: 'NO_DESCRIPTOR', confidence: 0 };
-
-    // 2. Identify input source: live video OR captured image
-    let inputSource = null;
-    if (isCameraActive && this.videoElement) {
-      inputSource = this.videoElement;
-    } else if (capturedImage) {
-      const img = new Image();
-      img.src = capturedImage;
-      await new Promise((resolve) => {
-        img.onload = resolve;
-        img.onerror = resolve;
+      const registeredName = this.state.enrolledStudent?.name || this.state.rollNumber;
+      this.setState({
+        capturedImage: dataUrl,
+        faceMatchStatus: matchStatus,
+        faceMatchConfidence: matchConf,
+        liveDistance: dist !== null ? Math.round(dist * 1000) / 1000 : null,
+        errorMessage:
+          matchStatus === 'NO_MATCH'
+            ? `❌ BIOMETRIC MISMATCH: Candidate in front of camera is NOT '${registeredName}'! Entry will be BLOCKED.`
+            : '',
       });
-      inputSource = img;
-    } else if (this.canvasRef.current) {
-      inputSource = this.canvasRef.current;
+    } catch (err) {
+      this.setState({ errorMessage: `Photo capture error: ${err.message}` });
     }
+  };
 
-    if (!inputSource) return { status: 'NO_DESCRIPTOR', confidence: 0 };
-
-    // 3. Detect live face descriptor
-    let liveDetection;
-    try {
-      liveDetection = await faceapi
-        .detectSingleFace(inputSource, new faceapi.TinyFaceDetectorOptions())
-        .withFaceLandmarks()
-        .withFaceDescriptor();
-    } catch {
-      return { status: 'NO_DESCRIPTOR', confidence: 0 };
+  simulateCameraCapture = () => {
+    const canvas = this.canvasRef.current || document.createElement('canvas');
+    canvas.width = 300;
+    canvas.height = 400;
+    const ctx = canvas.getContext ? canvas.getContext('2d') : null;
+    let dataUrl = '';
+    if (ctx) {
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(0, 0, 300, 400);
+      ctx.fillStyle = '#10b981';
+      ctx.font = 'bold 12px monospace';
+      ctx.fillText('SIMULATED CAPTURE', 15, 30);
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '10px monospace';
+      ctx.fillText(`TIMESTAMP: ${new Date().toLocaleTimeString()}`, 15, 380);
+      dataUrl = canvas.toDataURL('image/jpeg', 0.9);
     }
-
-    if (!liveDetection) return { status: 'NO_DESCRIPTOR', confidence: 0 };
-
-    // 4. Compute Euclidean distance (0 = identical, 1+ = completely different)
-    const distance = faceapi.euclideanDistance(liveDetection.descriptor, storedDescriptor);
-    const confidence = Math.max(0, Math.min(100, Math.round((1 - distance) * 100 * 10) / 10));
-    const matched = distance < FACE_MATCH_THRESHOLD;
-
-    this.setState({
-      faceMatchStatus: matched ? 'MATCHED' : 'NO_MATCH',
-      faceMatchConfidence: confidence,
-    });
-    return { status: matched ? 'MATCHED' : 'NO_MATCH', confidence };
+    this.setState({ capturedImage: dataUrl, isCameraActive: false });
   };
 
   handleVerifySubmit = async (e) => {
     e.preventDefault();
-    const { rollNumber, seatId, centerCode, capturedImage, modelsLoaded, isCameraActive, enrolledStudent } = this.state;
+    const {
+      rollNumber,
+      seatId,
+      centerCode,
+      capturedImage,
+      isCameraActive,
+      enrolledStudent,
+      faceMatchStatus,
+      faceMatchConfidence,
+    } = this.state;
+
     if (!rollNumber.trim()) {
       this.setState({ errorMessage: 'Student Roll Number / Enrollment ID is required.' });
       return;
     }
+
     this.setState({ verifying: true, errorMessage: '', verificationResult: null });
 
-    // Run face match
-    let faceMatchResult = { status: 'NO_DESCRIPTOR', confidence: null };
-    if (modelsLoaded && (isCameraActive || capturedImage)) {
-      faceMatchResult = await this.runFaceMatch();
+    // 1. If student has an enrolled face in DB, biometric matching is STRICTLY MANDATORY!
+    if (enrolledStudent && enrolledStudent.hasDescriptor) {
+      // If camera is still live, capture and evaluate descriptor right now
+      if (isCameraActive && this.videoElement) {
+        await this.captureRuntimePhoto();
+      }
+
+      // Check if we captured a valid live descriptor
+      if (!this.lastLiveDescriptor) {
+        this.setState({
+          verifying: false,
+          errorMessage:
+            '❌ LIVE CAMERA PHOTO REQUIRED: This candidate has an enrolled biometric record. Start webcam and capture candidate photo to verify identity.',
+        });
+        return;
+      }
+
+      // Strictly evaluate distance
+      const dist = faceapi.euclideanDistance(this.lastLiveDescriptor, enrolledStudent.rawDescriptor);
+      const isMatched = dist < FACE_MATCH_THRESHOLD;
+      const conf = Math.max(0, Math.min(100, Math.round((1 - dist / 0.8) * 100 * 10) / 10));
+
+      // BLOCK ENTRY IF DIFFERENT PERSON!
+      if (!isMatched) {
+        const candidateName = enrolledStudent.name ? `('${enrolledStudent.name}')` : '';
+        this.setState({
+          verifying: false,
+          faceMatchStatus: 'NO_MATCH',
+          faceMatchConfidence: conf,
+          errorMessage: `❌ ACCESS DENIED: BIOMETRIC MISMATCH! The person in front of the camera does NOT match registered student ${candidateName}. Distance: ${Math.round(dist * 100) / 100} (Threshold: ${FACE_MATCH_THRESHOLD}). Entry BLOCKED.`,
+        });
+        return;
+      }
+
+      // Otherwise it's a confirmed match!
+      this.setState({ faceMatchStatus: 'MATCHED', faceMatchConfidence: conf });
     }
 
-    // If face is enrolled in DB but live match failed, block entry
-    if (faceMatchResult.status === 'NO_MATCH') {
-      const candidateName = enrolledStudent?.name ? `(${enrolledStudent.name})` : '';
-      this.setState({
-        verifying: false,
-        faceMatchStatus: 'NO_MATCH',
-        errorMessage: `❌ FACE MISMATCH: Live face does not match database record for ${rollNumber.trim().toUpperCase()} ${candidateName}. Confidence: ${faceMatchResult.confidence}%. Entry DENIED.`,
-      });
-      return;
-    }
-
-    // Capture photo if camera is still live
-    if (isCameraActive) await this.captureRuntimePhoto();
-
+    // 2. Submit to backend
     try {
       const response = await fetch(`${API_BASE}/api/verify-student`, {
         method: 'POST',
@@ -293,16 +343,16 @@ export default class VerificationTerminal extends React.Component {
           seat_id: seatId,
           center_code: centerCode,
           captured_image_base64: this.state.capturedImage || capturedImage,
-          face_match_confidence: faceMatchResult.confidence,
-          face_match_status: faceMatchResult.status,
+          face_match_confidence: this.state.faceMatchConfidence || faceMatchConfidence,
+          face_match_status: this.state.faceMatchStatus || faceMatchStatus || 'MATCHED',
         }),
       });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || 'Student verification failed.');
-      }
       const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.detail || 'Student verification rejected.');
+      }
+
       try {
         const img = this.state.capturedImage || capturedImage;
         if (img) localStorage.setItem(`STUDENT_VERIFICATION_${rollNumber.trim().toUpperCase()}`, img);
@@ -315,6 +365,7 @@ export default class VerificationTerminal extends React.Component {
   };
 
   resetVerification = () => {
+    this.lastLiveDescriptor = null;
     this.setState({
       capturedImage: null,
       verificationResult: null,
@@ -322,7 +373,7 @@ export default class VerificationTerminal extends React.Component {
       cameraError: '',
       faceMatchStatus: '',
       faceMatchConfidence: null,
-      storedDescriptor: null,
+      liveDistance: null,
     });
     this.stopCamera();
     if (this.state.rollNumber) {
@@ -345,17 +396,16 @@ export default class VerificationTerminal extends React.Component {
       modelsLoading,
       modelError,
       liveDetectionStatus,
-      faceDetected,
       faceMatchStatus,
       faceMatchConfidence,
+      liveDistance,
       enrolledStudent,
       lookingUpStudent,
     } = this.state;
 
     const getFaceStatusColor = () => {
-      if (faceMatchStatus === 'MATCHED') return 'bg-emerald-950 border-emerald-700 text-emerald-300';
-      if (faceMatchStatus === 'NO_MATCH') return 'bg-red-950 border-red-700 text-red-300';
-      if (faceMatchStatus === 'MATCHING') return 'bg-blue-950 border-blue-700 text-blue-300';
+      if (faceMatchStatus === 'MATCHED') return 'bg-emerald-950 border-emerald-500 text-emerald-300';
+      if (faceMatchStatus === 'NO_MATCH') return 'bg-red-950 border-red-500 text-red-300 animate-pulse';
       if (liveDetectionStatus === 'FACE_FOUND') return 'bg-cyan-950 border-cyan-700 text-cyan-300';
       return 'bg-slate-900 border-slate-700 text-slate-400';
     };
@@ -403,8 +453,9 @@ export default class VerificationTerminal extends React.Component {
               </div>
             )}
 
+            {/* VERIFICATION SUCCESS CARD */}
             {verificationResult ? (
-              <div className="bg-slate-950 p-6 rounded-lg border-2 border-emerald-500/80 space-y-6 font-mono shadow-2xl">
+              <div className="bg-slate-950 p-6 rounded-lg border-2 border-emerald-500 space-y-6 font-mono shadow-2xl">
                 <div className="flex items-center justify-between border-b border-slate-800 pb-4">
                   <div className="flex items-center gap-3">
                     <span className="text-3xl">✅</span>
@@ -413,11 +464,11 @@ export default class VerificationTerminal extends React.Component {
                         CANDIDATE ENTRY CLEARED & VERIFIED
                       </h2>
                       <p className="text-xs text-slate-400">
-                        Exam Hall Clearance — Verified via Face Recognition DB
+                        Exam Hall Clearance — Biometric Face Verification Passed
                       </p>
                     </div>
                   </div>
-                  <span className="bg-emerald-950 text-emerald-300 border border-emerald-800 text-xs px-3 py-1 rounded font-bold">
+                  <span className="bg-emerald-950 text-emerald-300 border border-emerald-700 text-xs px-3 py-1 rounded font-bold">
                     PASS VERIFIED
                   </span>
                 </div>
@@ -444,23 +495,23 @@ export default class VerificationTerminal extends React.Component {
 
                   {/* Details Column */}
                   <div className="md:col-span-2 space-y-3 text-xs">
-                    {/* PROMINENT REGISTERED CANDIDATE NAME BANNER */}
-                    <div className="bg-slate-900 p-3.5 rounded-lg border border-purple-800/80 bg-gradient-to-r from-purple-950/40 to-slate-900 flex items-center justify-between">
+                    {/* CANDIDATE NAME BANNER */}
+                    <div className="bg-slate-900 p-3.5 rounded-lg border border-purple-700 bg-gradient-to-r from-purple-950/40 to-slate-900 flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <span className="text-2xl">👤</span>
                         <div>
                           <span className="text-[10px] text-purple-400 font-bold uppercase tracking-wider block">
-                            Registered Student Name
+                            Registered Candidate Name
                           </span>
                           <span className="text-purple-200 font-extrabold text-base tracking-wide uppercase">
                             {verificationResult.student_name ||
                               enrolledStudent?.name ||
-                              'REGISTERED CANDIDATE'}
+                              'VERIFIED CANDIDATE'}
                           </span>
                         </div>
                       </div>
-                      <span className="bg-purple-950 border border-purple-700 text-purple-300 text-[10px] px-2.5 py-1 rounded font-bold uppercase">
-                        ✓ Identity Matched
+                      <span className="bg-emerald-950 border border-emerald-600 text-emerald-300 text-[10px] px-2.5 py-1 rounded font-bold uppercase">
+                        ✓ Face Matched
                       </span>
                     </div>
 
@@ -479,20 +530,14 @@ export default class VerificationTerminal extends React.Component {
                       </div>
                       <div className="bg-slate-900 p-3 rounded border border-slate-800">
                         <span className="text-slate-500 text-[10px] uppercase block">Face Match Status</span>
-                        <span
-                          className={`font-bold ${
-                            verificationResult.face_match_status === 'MATCHED'
-                              ? 'text-emerald-400'
-                              : 'text-amber-400'
-                          }`}
-                        >
+                        <span className="font-bold text-emerald-400">
                           {verificationResult.face_match_status || 'MATCHED'}
                         </span>
                       </div>
                       <div className="bg-slate-900 p-3 rounded border border-slate-800">
                         <span className="text-slate-500 text-[10px] uppercase block">Match Confidence</span>
                         <span className="text-cyan-400 font-bold">
-                          {verificationResult.facial_match_confidence || 98.4}%
+                          {verificationResult.facial_match_confidence}%
                         </span>
                       </div>
                     </div>
@@ -519,11 +564,11 @@ export default class VerificationTerminal extends React.Component {
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Camera Panel */}
+                {/* 1. Camera Panel */}
                 <div className="bg-slate-950 p-5 rounded-lg border border-slate-800 space-y-4 font-mono">
                   <div className="border-b border-slate-800 pb-2 flex items-center justify-between">
                     <h3 className="text-sm font-bold text-cyan-400 uppercase">1. Live Face Capture</h3>
-                    <span className="text-[10px] text-slate-400">face-api.js Recognition</span>
+                    <span className="text-[10px] text-slate-400">face-api.js Biometrics</span>
                   </div>
 
                   {cameraError && (
@@ -532,24 +577,31 @@ export default class VerificationTerminal extends React.Component {
                     </div>
                   )}
 
-                  {/* Face status bar */}
+                  {/* REAL-TIME FACE STATUS BADGE */}
                   {(isCameraActive || faceMatchStatus) && (
                     <div
-                      className={`text-xs font-bold px-3 py-1.5 rounded border font-mono text-center transition-all ${getFaceStatusColor()}`}
+                      className={`text-xs font-bold px-3 py-2 rounded border font-mono text-center transition-all ${getFaceStatusColor()}`}
                     >
-                      {faceMatchStatus === 'MATCHING' && '🔄 RUNNING FACE MATCH...'}
-                      {faceMatchStatus === 'MATCHED' &&
-                        `✅ FACE MATCHED — ${faceMatchConfidence}% confidence`}
-                      {faceMatchStatus === 'NO_MATCH' &&
-                        `❌ FACE MISMATCH — ${faceMatchConfidence}% confidence`}
-                      {faceMatchStatus === 'NO_DESCRIPTOR' &&
-                        '⚠️ No enrolled face found for this roll number'}
-                      {!faceMatchStatus &&
-                        liveDetectionStatus === 'FACE_FOUND' &&
-                        '✅ Face detected — Ready to verify'}
-                      {!faceMatchStatus &&
-                        liveDetectionStatus === 'NO_FACE' &&
-                        '👁️ Searching for face...'}
+                      {faceMatchStatus === 'MATCHED' && (
+                        <span>
+                          ✅ MATCH CONFIRMED — {faceMatchConfidence}% Confidence
+                          {enrolledStudent?.name ? ` (${enrolledStudent.name})` : ''}
+                        </span>
+                      )}
+                      {faceMatchStatus === 'NO_MATCH' && (
+                        <span className="text-red-300">
+                          ❌ MISMATCH: Face does not match registered student{' '}
+                          {enrolledStudent?.name ? `'${enrolledStudent.name}'` : ''}!
+                        </span>
+                      )}
+                      {!faceMatchStatus && liveDetectionStatus === 'FACE_FOUND' && (
+                        <span className="text-cyan-300">
+                          👁️ Face detected — Hold still or capture snapshot
+                        </span>
+                      )}
+                      {!faceMatchStatus && liveDetectionStatus === 'NO_FACE' && (
+                        <span className="text-slate-400">👁️ Position face in center of frame...</span>
+                      )}
                     </div>
                   )}
 
@@ -558,7 +610,7 @@ export default class VerificationTerminal extends React.Component {
                       <div className="relative w-full h-full flex items-center justify-center bg-slate-950">
                         <img src={capturedImage} alt="Captured" className="h-full object-contain aspect-[3/4]" />
                         <div className="absolute top-2 left-2 bg-emerald-950/90 border border-emerald-700 text-emerald-300 text-[9px] px-2 py-0.5 rounded font-bold">
-                          SNAPSHOT CAPTURED
+                          SNAPSHOT READY
                         </div>
                       </div>
                     ) : isCameraActive ? (
@@ -570,22 +622,34 @@ export default class VerificationTerminal extends React.Component {
                           playsInline
                           muted
                         />
-                        {liveDetectionStatus === 'FACE_FOUND' && (
+                        {faceMatchStatus === 'MATCHED' && (
                           <div
                             className="absolute inset-0 border-4 border-emerald-400 rounded-lg pointer-events-none"
-                            style={{ boxShadow: '0 0 20px rgba(52,211,153,0.4)' }}
+                            style={{ boxShadow: '0 0 25px rgba(52,211,153,0.6)' }}
+                          />
+                        )}
+                        {faceMatchStatus === 'NO_MATCH' && (
+                          <div
+                            className="absolute inset-0 border-4 border-red-500 rounded-lg pointer-events-none"
+                            style={{ boxShadow: '0 0 25px rgba(239,68,68,0.7)' }}
+                          />
+                        )}
+                        {!faceMatchStatus && liveDetectionStatus === 'FACE_FOUND' && (
+                          <div
+                            className="absolute inset-0 border-2 border-cyan-400 rounded-lg pointer-events-none"
+                            style={{ boxShadow: '0 0 15px rgba(34,211,238,0.4)' }}
                           />
                         )}
                       </>
                     ) : (
                       <div className="text-center p-4 space-y-2">
                         <div className="text-4xl">📷</div>
-                        <p className="text-xs text-slate-400">Start webcam for live face verification</p>
+                        <p className="text-xs text-slate-400">Start webcam to verify candidate</p>
                       </div>
                     )}
                   </div>
 
-                  <div className="space-y-2">
+                  <div>
                     {!capturedImage ? (
                       isCameraActive ? (
                         <button
@@ -607,9 +671,9 @@ export default class VerificationTerminal extends React.Component {
                           <button
                             type="button"
                             onClick={this.simulateCameraCapture}
-                            className="bg-cyan-900/60 hover:bg-cyan-800 border border-cyan-700 text-cyan-300 font-bold py-2 rounded text-xs transition-colors"
+                            className="bg-slate-900 border border-slate-700 text-slate-400 hover:text-slate-200 text-xs py-2 rounded font-bold transition-colors"
                           >
-                            ⚡ SIMULATE CAPTURE
+                            ⚡ SIMULATE
                           </button>
                         </div>
                       )
@@ -630,20 +694,21 @@ export default class VerificationTerminal extends React.Component {
                   </div>
                 </div>
 
-                {/* Verification Form */}
+                {/* 2. Verification Form */}
                 <div className="bg-slate-950 p-5 rounded-lg border border-slate-800 space-y-4 font-mono">
                   <div className="border-b border-slate-800 pb-2">
                     <h3 className="text-sm font-bold text-emerald-400 uppercase">
-                      2. Enrollment & Hall Verification
+                      2. Candidate Verification Form
                     </h3>
                     <p className="text-[11px] text-slate-400 mt-0.5">
-                      Verify Roll Number + Match live face against database descriptor
+                      Verify Roll Number + Strictly match live face against registered record
                     </p>
                   </div>
 
+                  {/* ERROR / REJECTION MESSAGE */}
                   {errorMessage && (
-                    <div className="bg-red-950 border border-red-800 text-red-200 p-2.5 rounded text-xs">
-                      [ERROR] {errorMessage}
+                    <div className="bg-red-950 border-2 border-red-600 text-red-200 p-3 rounded text-xs font-bold leading-relaxed shadow-lg">
+                      {errorMessage}
                     </div>
                   )}
 
@@ -662,36 +727,36 @@ export default class VerificationTerminal extends React.Component {
                           this.checkEnrolledStudent(val);
                         }}
                         className="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-slate-100 font-bold uppercase focus:outline-none focus:border-cyan-500"
-                        placeholder="e.g. 2026-CS-109"
+                        placeholder="e.g. 2026-CS-111"
                         required
                       />
 
-                      {/* LIVE REGISTERED CANDIDATE PREVIEW */}
+                      {/* REGISTERED CANDIDATE PREVIEW */}
                       {lookingUpStudent ? (
                         <div className="mt-2 text-[10px] text-cyan-400 font-mono animate-pulse">
-                          🔍 Searching database for registered student...
+                          🔍 Looking up candidate record...
                         </div>
                       ) : enrolledStudent ? (
-                        <div className="mt-2 p-2.5 bg-slate-900/90 border border-purple-700/80 rounded flex items-center justify-between text-xs font-mono">
+                        <div className="mt-2 p-3 bg-purple-950/50 border border-purple-700 rounded flex items-center justify-between text-xs font-mono">
                           <div className="flex items-center gap-2">
-                            <span className="text-lg">👤</span>
+                            <span className="text-xl">👤</span>
                             <div>
                               <span className="text-[9px] text-purple-400 uppercase block font-semibold">
-                                Registered Student in Database
+                                Registered Candidate in Database
                               </span>
                               <span className="text-purple-200 font-extrabold text-sm tracking-wide uppercase">
-                                {enrolledStudent.name || 'Unnamed Candidate'}
+                                {enrolledStudent.name || 'Enrolled Candidate'}
                               </span>
                             </div>
                           </div>
-                          <span className="bg-purple-950 border border-purple-700 text-purple-300 text-[10px] px-2 py-0.5 rounded font-bold">
-                            ✓ FACE READY
+                          <span className="bg-emerald-950 border border-emerald-600 text-emerald-300 text-[10px] px-2 py-0.5 rounded font-bold">
+                            ✓ BIOMETRIC ENROLLED
                           </span>
                         </div>
                       ) : (
                         rollNumber.trim().length >= 3 && (
                           <div className="mt-2 p-2 bg-slate-900/60 border border-slate-800 rounded text-[10px] text-slate-400 font-mono">
-                            ℹ️ No student face enrolled in DB yet for '{rollNumber.trim().toUpperCase()}'.
+                            ℹ️ No biometric face record found in DB for '{rollNumber.trim().toUpperCase()}'.
                           </div>
                         )
                       )}
@@ -727,12 +792,12 @@ export default class VerificationTerminal extends React.Component {
                     </div>
 
                     <div className="p-3 bg-slate-900/80 border border-cyan-900/60 rounded text-[11px] text-cyan-300 space-y-1">
-                      <p className="font-bold flex items-center gap-1">ℹ️ FACE RECOGNITION ENGINE</p>
+                      <p className="font-bold flex items-center gap-1">🛡️ BIOMETRIC INTEGRITY SYSTEM</p>
                       <ul className="text-slate-400 text-[10px] leading-relaxed space-y-0.5">
-                        <li>• Fetches enrolled 128-point descriptor from DB for roll number</li>
-                        <li>• Compares live face descriptor (euclidean distance)</li>
-                        <li>• Distance &lt; 0.55 = MATCHED ✅ | &gt; 0.55 = BLOCKED ❌</li>
-                        <li>• Displays registered candidate name upon match</li>
+                        <li>• Compares live 128-point vector against registered record</li>
+                        <li>• Strict Threshold: Distance &lt; 0.52 = MATCHED ✅</li>
+                        <li>• Distance &ge; 0.52 (Different Person) = ENTRY BLOCKED ❌</li>
+                        <li>• Impersonation attempts are logged to the security audit trail</li>
                       </ul>
                     </div>
 
@@ -742,7 +807,7 @@ export default class VerificationTerminal extends React.Component {
                       className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 text-slate-950 font-bold py-3 rounded text-sm transition-colors flex items-center justify-center gap-2"
                     >
                       {verifying
-                        ? '🔄 RUNNING FACE MATCH & VERIFYING...'
+                        ? '🔄 COMPARING FACE VECTORS & VERIFYING...'
                         : '🔍 RUN CANDIDATE VERIFICATION'}
                     </button>
                   </form>

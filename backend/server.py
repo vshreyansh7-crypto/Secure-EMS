@@ -1168,6 +1168,21 @@ def verify_student_entry(payload: StudentVerificationRequest, request: Request):
 
     has_image = bool(payload.captured_image_base64)
 
+    # Look up registered student from student_faces
+    student_name = ""
+    has_enrolled_face = False
+    try:
+        conn_face = get_db_connection()
+        c_face = conn_face.cursor()
+        c_face.execute("SELECT student_name, face_descriptor FROM student_faces WHERE UPPER(roll_number) = ?", (roll,))
+        f_row = c_face.fetchone()
+        if f_row:
+            student_name = f_row["student_name"] or ""
+            has_enrolled_face = bool(f_row["face_descriptor"])
+        conn_face.close()
+    except Exception:
+        pass
+
     # Use real face-api.js confidence if provided, else fallback
     if payload.face_match_confidence is not None:
         confidence = round(payload.face_match_confidence, 2)
@@ -1177,25 +1192,17 @@ def verify_student_entry(payload: StudentVerificationRequest, request: Request):
     # Use real face match status from frontend face-api.js
     face_status = payload.face_match_status or ("MATCHED" if has_image else "NO_IMAGE")
 
-    # Block entry if face does not match
-    if face_status == "NO_MATCH":
+    # STRICT SECURITY: If student has registered face in DB, candidate MUST match live face!
+    if has_enrolled_face and face_status != "MATCHED":
+        log_audit_event(
+            action_type="STUDENT_VERIFICATION_REJECTED",
+            details=f"SECURITY ALERT: Biometric mismatch for Roll '{roll}' (Registered: {student_name}). Live face did not match. Status: {face_status}. Confidence: {confidence}%.",
+            ip_address=client_ip
+        )
         raise HTTPException(
             status_code=403,
-            detail=f"FACE MISMATCH: Student '{roll}' facial recognition failed. Confidence: {confidence}%. Entry DENIED."
+            detail=f"BIOMETRIC ENTRY DENIED: The person in front of the camera does NOT match the registered student record for Roll '{roll}' ({student_name}). Face Match: {face_status} ({confidence}%). Entry BLOCKED."
         )
-
-    # Look up registered student name from student_faces if available
-    student_name = ""
-    try:
-        conn_face = get_db_connection()
-        c_face = conn_face.cursor()
-        c_face.execute("SELECT student_name FROM student_faces WHERE UPPER(roll_number) = ?", (roll,))
-        f_row = c_face.fetchone()
-        if f_row and f_row["student_name"]:
-            student_name = f_row["student_name"]
-        conn_face.close()
-    except Exception:
-        pass
 
     clearance_token = f"PASS-{roll}-{int(datetime.now().timestamp())}"
 
