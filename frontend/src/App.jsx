@@ -5,6 +5,7 @@ import SupervisorTerminal from './SupervisorTerminal.jsx';
 import AdminTerminal from './AdminTerminal.jsx';
 import VerificationTerminal from './VerificationTerminal.jsx';
 import CenterRegistrationTerminal from './CenterRegistrationTerminal.jsx';
+import StudentFaceEnrollment from './StudentFaceEnrollment.jsx';
 
 export default function App() {
   const [route, setRoute] = useState(window.location.pathname);
@@ -59,12 +60,23 @@ export default function App() {
     window.location.search.includes('portal=student') ||
     window.location.hash.includes('student');
 
+  const isEnrollPortal =
+    hostname.includes('enroll') ||
+    defaultPortal === 'enroll' ||
+    route.startsWith('/enroll') ||
+    window.location.search.includes('portal=enroll') ||
+    window.location.hash.includes('enroll');
+
   if (isRegisterPortal) {
     return <CenterRegistrationTerminal />;
   }
 
   if (isVerifyPortal) {
     return <VerificationTerminal />;
+  }
+
+  if (isEnrollPortal) {
+    return <StudentFaceEnrollment />;
   }
 
   if (isAdminPortal) {

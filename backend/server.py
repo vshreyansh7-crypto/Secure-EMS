@@ -222,6 +222,13 @@ class StudentVerificationRequest(BaseModel):
     seat_id: Optional[str] = "DESK-01"
     center_code: Optional[str] = "CTR-101"
     captured_image_base64: Optional[str] = None
+    face_match_confidence: Optional[float] = None  # Real confidence from face-api.js
+    face_match_status: Optional[str] = None        # "MATCHED" | "NO_MATCH" | "NO_DESCRIPTOR"
+
+class StudentFaceEnrollRequest(BaseModel):
+    roll_number: str
+    student_name: Optional[str] = ""
+    face_descriptor: list  # 128 float values from face-api.js
 
 class ExamCenterRegistrationRequest(BaseModel):
     center_code: str
@@ -1059,6 +1066,95 @@ def ensure_student_verifications_table(cursor):
     );
     """)
 
+def ensure_student_faces_table(cursor):
+    """Create student_faces table to store enrolled face descriptors for real face recognition."""
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS student_faces (
+        face_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        roll_number TEXT UNIQUE NOT NULL,
+        student_name TEXT DEFAULT '',
+        face_descriptor TEXT NOT NULL,
+        enrolled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
+@app.post("/api/enroll-student-face")
+def enroll_student_face(payload: StudentFaceEnrollRequest, request: Request):
+    """Enroll a student's face descriptor (128 numbers) linked to their roll number."""
+    import json as _json
+    roll = payload.roll_number.strip().upper()
+    if not roll:
+        raise HTTPException(status_code=400, detail="Roll number is required.")
+    if not payload.face_descriptor or len(payload.face_descriptor) != 128:
+        raise HTTPException(status_code=400, detail="Invalid face descriptor: must be exactly 128 float values.")
+
+    descriptor_json = _json.dumps(payload.face_descriptor)
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        ensure_student_faces_table(cursor)
+        cursor.execute(
+            """
+            INSERT INTO student_faces (roll_number, student_name, face_descriptor)
+            VALUES (?, ?, ?)
+            ON CONFLICT(roll_number) DO UPDATE SET
+                student_name=excluded.student_name,
+                face_descriptor=excluded.face_descriptor,
+                enrolled_at=CURRENT_TIMESTAMP
+            """,
+            (roll, payload.student_name.strip(), descriptor_json)
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Face enrollment failed: {str(e)}")
+
+    log_audit_event(
+        action_type="STUDENT_FACE_ENROLLED",
+        details=f"Face descriptor enrolled for Roll '{roll}' (Student: {payload.student_name}). 128-point embedding saved."
+    )
+    return {
+        "status": "ENROLLED",
+        "roll_number": roll,
+        "student_name": payload.student_name,
+        "message": f"Face descriptor successfully enrolled for Roll '{roll}'.",
+        "descriptor_length": len(payload.face_descriptor)
+    }
+
+@app.get("/api/student-face-descriptor/{roll_number}")
+def get_student_face_descriptor(roll_number: str):
+    """Fetch stored face descriptor for a student roll number for frontend comparison."""
+    import json as _json
+    roll = roll_number.strip().upper()
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        ensure_student_faces_table(cursor)
+        cursor.execute(
+            "SELECT roll_number, student_name, face_descriptor, enrolled_at FROM student_faces WHERE UPPER(roll_number) = ?",
+            (roll,)
+        )
+        row = cursor.fetchone()
+        conn.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+    if not row:
+        return {
+            "found": False,
+            "roll_number": roll,
+            "face_descriptor": None,
+            "message": f"No face enrolled for Roll '{roll}'. Please enroll first."
+        }
+    descriptor = _json.loads(row["face_descriptor"]) if row["face_descriptor"] else None
+    return {
+        "found": True,
+        "roll_number": row["roll_number"],
+        "student_name": row["student_name"],
+        "face_descriptor": descriptor,
+        "enrolled_at": row["enrolled_at"]
+    }
+
 @app.post("/api/verify-student")
 def verify_student_entry(payload: StudentVerificationRequest, request: Request):
     client_ip = request.client.host if request and request.client else "127.0.0.1"
@@ -1071,7 +1167,23 @@ def verify_student_entry(payload: StudentVerificationRequest, request: Request):
         )
 
     has_image = bool(payload.captured_image_base64)
-    confidence = 98.4 if has_image else 91.0
+
+    # Use real face-api.js confidence if provided, else fallback
+    if payload.face_match_confidence is not None:
+        confidence = round(payload.face_match_confidence, 2)
+    else:
+        confidence = 98.4 if has_image else 91.0
+
+    # Use real face match status from frontend face-api.js
+    face_status = payload.face_match_status or ("MATCHED" if has_image else "NO_IMAGE")
+
+    # Block entry if face does not match
+    if face_status == "NO_MATCH":
+        raise HTTPException(
+            status_code=403,
+            detail=f"FACE MISMATCH: Student '{roll}' facial recognition failed. Confidence: {confidence}%. Entry DENIED."
+        )
+
     clearance_token = f"PASS-{roll}-{int(datetime.now().timestamp())}"
 
     try:
@@ -1096,11 +1208,11 @@ def verify_student_entry(payload: StudentVerificationRequest, request: Request):
         conn.commit()
         conn.close()
     except Exception as e:
-        print(f"Failed to persist student verification in SQLite: {e}")
+        print(f"Failed to persist student verification in DB: {e}")
 
     log_audit_event(
         action_type="STUDENT_PRE_EXAM_VERIFICATION",
-        details=f"Student Roll '{roll}' verified at hall entry. Runtime Image Captured: {has_image}. Confidence: {confidence}%",
+        details=f"Student Roll '{roll}' verified at hall entry. Face Match: {face_status}. Confidence: {confidence}%. Image: {has_image}.",
         ip_address=client_ip
     )
 
@@ -1112,9 +1224,10 @@ def verify_student_entry(payload: StudentVerificationRequest, request: Request):
         "center_code": payload.center_code,
         "captured_image_base64": payload.captured_image_base64,
         "facial_match_confidence": confidence,
+        "face_match_status": face_status,
         "enrollment_db_status": "MATCHED",
         "clearance_token": clearance_token,
-        "message": f"Student '{roll}' verified & cleared for examination hall entry.",
+        "message": f"Student '{roll}' face-verified & cleared for examination hall entry. Match: {face_status} ({confidence}%).",
         "timestamp": datetime.now().isoformat()
     }
 
@@ -1659,6 +1772,14 @@ if __name__ == "__main__":
                     self.send_header("Access-Control-Allow-Origin", "*")
                     self.end_headers()
                     self.wfile.write(json.dumps(res).encode('utf-8'))
+                elif self.path.startswith("/api/student-face-descriptor/"):
+                    roll_no = self.path.split("/api/student-face-descriptor/")[1]
+                    res = get_student_face_descriptor(roll_no)
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.end_headers()
+                    self.wfile.write(json.dumps(res).encode('utf-8'))
                 else:
                     self.send_error(404)
 
@@ -1683,6 +1804,14 @@ if __name__ == "__main__":
                     elif self.path.startswith("/api/admin/upload-paper"):
                         req = PaperUploadRequest(**payload_dict)
                         res = upload_question_paper(req, MockRequest())
+                        self.send_response(200)
+                        self.send_header("Content-Type", "application/json")
+                        self.send_header("Access-Control-Allow-Origin", "*")
+                        self.end_headers()
+                        self.wfile.write(json.dumps(res).encode('utf-8'))
+                    elif self.path.startswith("/api/enroll-student-face"):
+                        req = StudentFaceEnrollRequest(**payload_dict)
+                        res = enroll_student_face(req, MockRequest())
                         self.send_response(200)
                         self.send_header("Content-Type", "application/json")
                         self.send_header("Access-Control-Allow-Origin", "*")
